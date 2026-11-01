@@ -34,8 +34,27 @@ class LoadInfo:
     color_discarded: bool
 
 
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def png_bit_depth(path: str | Path) -> int | None:
+    """PNG IHDR 헤더의 채널당 비트 깊이. PNG가 아니면 None.
+
+    Pillow는 16-bit RGB(A) PNG를 열 때 경고 없이 8-bit로 줄이므로, 열기 전에 헤더로 직접 확인한다.
+    """
+    with open(path, "rb") as f:
+        head = f.read(25)
+    # 시그니처(8) + 청크 길이(4) + "IHDR"(4) + 너비(4) + 높이(4) + 비트 깊이(1)
+    if len(head) < 25 or head[:8] != PNG_SIGNATURE or head[12:16] != b"IHDR":
+        return None
+    return head[24]
+
+
 def load_rgba(path: str | Path) -> tuple[np.ndarray, LoadInfo]:
     """PNG를 읽어 RGBA 배열로 반환한다. 원본 파일은 읽기만 한다."""
+    depth = png_bit_depth(path)
+    if depth is not None and depth > 8:
+        raise UnsupportedImageError(f"{depth}-bit PNG는 지원하지 않습니다 (8-bit만 지원). 8-bit로 내보낸 파일을 사용하세요.")
     with Image.open(Path(path)) as img:
         img.load()
         mode = img.mode

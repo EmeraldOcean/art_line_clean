@@ -24,9 +24,10 @@ M2 이후 범위·순서는 M1 결과에 따라 제안 후 승인으로 확정�
 
 ## M0 기록 (2026-11-01)
 - 의존성: `pillow`, `numpy`, `pytest`(dev)
-- 검증됨 (macOS): pytest 35개 통과, 합성 케이스 15개 항등 출력 픽셀 단위 동일·비생성 위반 0, 비교 시트 확인
+- 검증됨 (macOS): pytest 38개 통과, 합성 케이스 15개 항등 출력 픽셀 단위 동일·비생성 위반 0, 비교 시트 확인
 - 미검증: `samples/input/`의 실제 러프(파일 없음), Windows PowerShell 실행
-- 미해결: 16-bit RGB(A) PNG는 Pillow가 8-bit로 줄여 읽을 수 있어 감지가 불완전 (16-bit 그레이만 확실히 거부) · 비생성 허용치 d가 고정값(D-7)
+- 해결: 16-bit RGB(A) PNG를 Pillow가 경고 없이 8-bit로 줄이던 문제 → PNG 헤더의 비트 깊이를 먼저 읽어 거부
+- 미해결: 비생성 허용치 d가 고정값(D-7)
 
 ## 다음 예정 의존성
 - M1: `scikit-image` (+ 필요 시 `opencv-python-headless`) — 추가 전 확인

@@ -1,13 +1,18 @@
+import struct
+import zlib
+
 import numpy as np
 import pytest
 from PIL import Image
 
 from lineclean.io import (
+    PNG_SIGNATURE,
     PROTECTED_INPUT_DIR,
     OutputPathError,
     UnsupportedImageError,
     file_sha256,
     load_rgba,
+    png_bit_depth,
     save_rgba,
 )
 
@@ -110,6 +115,36 @@ def test_rejects_16bit(tmp_path):
     Image.fromarray(np.full((4, 4), 40000, dtype=np.uint16)).save(path)
     with pytest.raises(UnsupportedImageError):
         load_rgba(path)
+
+
+def _write_png16_rgba(path, rgba16):
+    """Pillow는 16-bit RGBA PNG를 쓸 수 없으므로 직접 만든다."""
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    h, w, _ = rgba16.shape
+    raw = b"".join(b"\x00" + row.astype(">u2").tobytes() for row in rgba16)
+    ihdr = struct.pack(">IIBBBBB", w, h, 16, 6, 0, 0, 0)  # 16-bit, 색 유형 6 = RGBA
+    path.write_bytes(PNG_SIGNATURE + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+def test_rejects_16bit_rgba(tmp_path):
+    path = tmp_path / "rgba16.png"
+    _write_png16_rgba(path, np.array([[[0, 0, 0, 0x8000], [0, 0, 0, 0x80FF]]], dtype=np.uint16))
+    assert png_bit_depth(path) == 16
+    with pytest.raises(UnsupportedImageError):
+        load_rgba(path)
+
+
+def test_bit_depth_of_8bit_png(tmp_path, random_rgba):
+    assert png_bit_depth(save_rgba(random_rgba, tmp_path / "a.png")) == 8
+
+
+def test_bit_depth_of_non_png(tmp_path):
+    path = tmp_path / "a.txt"
+    path.write_bytes(b"not a png")
+    assert png_bit_depth(path) is None
 
 
 def test_rejects_wrong_array(tmp_path):

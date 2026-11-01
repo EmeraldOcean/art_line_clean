@@ -57,5 +57,35 @@ def test_no_sheet(tmp_path, cases):
     assert not (tmp_path / "out" / "line_compare.png").exists()
 
 
+def test_merge_writes_log_and_overlay(tmp_path, cases):
+    src = save_rgba(cases["overdraw2_gap3"], tmp_path / "in" / "od.png")
+    out = tmp_path / "out" / "od.png"
+    assert main([str(src), "-o", str(out), "--merge"]) == EXIT_OK
+    log = (tmp_path / "out" / "od_merge_log.csv").read_text(encoding="utf-8-sig")
+    assert "병합" in log
+    assert (tmp_path / "out" / "od_merge_overlay.png").is_file()
+    result, _ = load_rgba(out)
+    assert not np.array_equal(result, cases["overdraw2_gap3"])
+
+
+def test_merge_refuses_when_log_exists(tmp_path, cases):
+    src = save_rgba(cases["overdraw2_gap3"], tmp_path / "in" / "od.png")
+    out = tmp_path / "out" / "od.png"
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "od_merge_log.csv").write_text("x")
+    assert main([str(src), "-o", str(out), "--merge"]) == EXIT_USAGE
+    assert not out.exists()
+    assert not (tmp_path / "out" / "od_compare.png").exists()
+
+
+def test_without_merge_overdraw_is_unchanged(tmp_path, cases):
+    src = save_rgba(cases["overdraw2_gap3"], tmp_path / "in" / "od.png")
+    out = tmp_path / "out" / "od.png"
+    assert main([str(src), "-o", str(out)]) == EXIT_OK
+    result, _ = load_rgba(out)
+    assert np.array_equal(result, cases["overdraw2_gap3"])
+    assert not (tmp_path / "out" / "od_merge_log.csv").exists()
+
+
 def test_missing_input(tmp_path):
     assert main([str(tmp_path / "nope.png"), "-o", str(tmp_path / "o.png")]) == EXIT_USAGE

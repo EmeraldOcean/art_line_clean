@@ -17,7 +17,12 @@ uv run python -m lineclean .\samples\input\rough.png -o .\output\rough_clean.png
 # 비교 시트(입력 | 출력 | 차이)는 output\ 에 함께 저장된다.
 ```
 
-현재(M0)는 처리 단계가 항등(그대로 복사)이다. 입출력·원본 보호·비교 시트만 동작한다.
+기본은 항등(그대로 복사) 처리다. `--merge`를 주면 덧그은 선 병합(M2, 개발 중)을 켜고,
+판정 기록(`<출력>_merge_log.csv`)과 병합 오버레이(`<출력>_merge_overlay.png`)도 함께 저장한다.
+
+```powershell
+uv run python -m lineclean .\samples\input\rough.png -o .\output\rough_merged.png --merge
+```
 
 ## 개발 (PowerShell)
 ```powershell

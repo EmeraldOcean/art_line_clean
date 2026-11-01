@@ -9,21 +9,18 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw
 
 from lineclean.io import OutputPathError, save_rgba
+from lineclean.render import WidthFn, stroke_coverage
 
 SIZE = (160, 160)  # (W, H)
-SUPERSAMPLE = 4
 STROKE_WIDTH = 3.0
 SEED = 20261101
 
 Path2D = np.ndarray  # (N, 2) float, 픽셀 좌표 (x, y)
-WidthFn = Callable[[np.ndarray], np.ndarray]  # 경로 위치 t∈[0,1] → 굵기(px)
 
 
 # ---- 경로 도구 -------------------------------------------------------------
@@ -66,31 +63,10 @@ def smooth_noise(rng: np.random.Generator, n: int, amplitude: float, window: int
 
 # ---- 렌더링 ---------------------------------------------------------------
 
-def _resample(path: Path2D, step: float) -> Path2D:
-    seg = np.linalg.norm(np.diff(path, axis=0), axis=1)
-    s = np.concatenate([[0.0], np.cumsum(seg)])
-    samples = np.arange(0.0, s[-1] + step, step).clip(max=s[-1])
-    return np.stack([np.interp(samples, s, path[:, i]) for i in range(2)], axis=1)
-
-
-def stamp(draw: ImageDraw.ImageDraw, path: Path2D, width: float | WidthFn = STROKE_WIDTH) -> None:
-    """원형 브러시를 0.25px 간격으로 찍어 획을 그린다 (좌표는 출력 픽셀 기준)."""
-    pts = _resample(path, 0.25)
-    t = np.linspace(0.0, 1.0, len(pts))
-    widths = width(t) if callable(width) else np.full(len(pts), width)
-    for (x, y), w in zip(pts * SUPERSAMPLE, widths * SUPERSAMPLE):
-        r = w / 2
-        draw.ellipse((x - r, y - r, x + r, y + r), fill=255)
-
-
 def render(strokes: list[tuple[Path2D, float | WidthFn]], ink_alpha: int = 255) -> np.ndarray:
     """획 목록을 검정 잉크 RGBA 배열로 그린다. ink_alpha < 255면 희미한 선."""
     w, h = SIZE
-    big = Image.new("L", (w * SUPERSAMPLE, h * SUPERSAMPLE), 0)
-    draw = ImageDraw.Draw(big)
-    for path, width in strokes:
-        stamp(draw, path, width)
-    alpha = np.array(big.resize(SIZE, Image.Resampling.BOX), dtype=np.uint16)
+    alpha = stroke_coverage(strokes, (0, 0, w, h)).astype(np.uint16)
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
     rgba[..., 3] = (alpha * ink_alpha // 255).astype(np.uint8)
     return rgba
@@ -144,8 +120,27 @@ def generate_all() -> dict[str, np.ndarray]:
         "sharp_corner": render([(polyline((30, 30), (80, 140), (130, 30)), STROKE_WIDTH)]),
         "faint_thin": render([(arc, 1.0)], ink_alpha=90),
         "tapered": render([(arc, lambda t: 0.5 + 4.0 * np.sin(np.pi * t))]),
+        # 약 12°로 얕게 교차하는 서로 다른 두 선: 병합하면 안 된다
+        "shallow_cross": render([
+            (polyline((20, 80), (140, 80)), STROKE_WIDTH),
+            (polyline((20, 80 - 60 * np.tan(np.radians(12))), (140, 80 + 60 * np.tan(np.radians(12)))), STROKE_WIDTH),
+        ]),
+        # 다른 선을 따라 나란히 가다가 갈라지는 선 (머리카락이 얼굴 윤곽을 따라가다 벗어나는 유형)
+        "touch_and_diverge": render([(arc, STROKE_WIDTH), (trim(_diverging(arc), 0.0, 0.75), STROKE_WIDTH)]),
     }
     return cases
+
+
+def _diverging(base: Path2D) -> Path2D:
+    t = np.linspace(0.0, 1.0, len(base))
+    spacing = STROKE_WIDTH + 1.0
+    return offset(base, spacing + np.clip(t - 0.4, 0.0, None) * 60.0)
+
+
+# 덧그림 케이스의 정답 중심선 (x, y). 병합 결과의 위치 오차를 재는 데 쓴다.
+def base_paths() -> dict[str, Path2D]:
+    arc = bezier((20, 120), (80, 10), (140, 110))
+    return {name: arc for name in ("overdraw2_gap0", "overdraw2_gap1", "overdraw2_gap3", "overdraw3_gap1")}
 
 
 # 사람이 기대하는 정답 위상: (끝점 수, 분기점 차수 목록, 엣지 수).
@@ -167,6 +162,9 @@ EXPECTED_TOPOLOGY: dict[str, tuple[int, list[int], int]] = {
     "sharp_corner": (2, [], 1),
     "faint_thin": (2, [], 1),
     "tapered": (2, [], 1),
+    "shallow_cross": (4, [4], 4),
+    # 서로 다른 두 선으로 보는 것이 정답이지만 판단이 갈릴 수 있다. M2에서는 결과만 보고한다.
+    "touch_and_diverge": (4, [], 2),
 }
 
 

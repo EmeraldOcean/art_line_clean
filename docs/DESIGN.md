@@ -22,8 +22,9 @@
 | cli.py / \_\_main\_\_.py | 명령행 진입점 | M0 (항등 처리) |
 | mask.py | 알파 → 잉크 마스크/농도 | M1 |
 | graph.py | 선 그래프 자료구조, 추출 | M1 |
-| merge.py / smooth.py / junction.py | 그래프 정리 | M2~ (M1 결과로 확정) |
-| render.py | 그래프 → RGBA | M2~ |
+| merge.py | 덧그림 판정·중간선 병합·판정 기록 | M2 |
+| smooth.py / junction.py | 그래프 정리 (떨림, 교차) | M3~ |
+| render.py | 획 렌더링 (M2는 임시 원형 브러시, 합성 이미지와 공유) | M2, M5에서 정교화 |
 
 ## 4. 알고리즘 후보와 현재 판단
 **그래프 추출은 확정(D-8)**: `skeletonize` + α ≥ 16, 블러·히스테리시스 없음, 잔가지 가지치기.

@@ -101,6 +101,34 @@ def graph_overlay(rgba: np.ndarray, graph, scale: int = 1) -> Image.Image:
     return img
 
 
+MERGED_SOURCE_COLOR = (150, 220, 150)  # 병합되어 지워진 원래 선
+MERGED_PATH_COLOR = (0, 120, 0)  # 대표 중간선
+SKIPPED_COLOR = (255, 140, 0)  # 건너뛴 후보
+
+
+def merge_overlay(rgba: np.ndarray, result, scale: int = 1) -> Image.Image:
+    """병합 판정 시각화: 병합된 원래 선은 연두, 대표 중간선은 진한 초록, 건너뛴 후보 엣지는 주황."""
+    h, w = rgba.shape[:2]
+    faint = rgba.copy()
+    faint[..., 3] = (faint[..., 3].astype(np.uint16) * 3 // 10).astype(np.uint8)
+    white = Image.new("RGBA", (w, h), (255, 255, 255, 255))
+    base = np.array(Image.alpha_composite(white, Image.fromarray(faint)).convert("RGB"))
+
+    edges = {e.id: e for e in result.graph.edges}
+    for d in result.decisions:
+        color = MERGED_SOURCE_COLOR if d.merged else SKIPPED_COLOR
+        for eid in d.edge_ids:
+            path = edges[eid].path
+            base[path[:, 0], path[:, 1]] = color
+    for d in result.decisions:
+        if d.merged and d.path is not None:
+            base[d.path[:, 0], d.path[:, 1]] = MERGED_PATH_COLOR
+    img = Image.fromarray(base)
+    if scale != 1:
+        img = img.resize((w * scale, h * scale), Image.Resampling.NEAREST)
+    return img
+
+
 def make_sheet(before: np.ndarray, after: np.ndarray) -> Image.Image:
     """[input | output | diff] 비교 시트. 축소하지 않고 원래 픽셀 크기로 나란히 놓는다.
 

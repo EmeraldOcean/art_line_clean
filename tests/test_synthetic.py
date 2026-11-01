@@ -1,6 +1,10 @@
 import numpy as np
 
-from lineclean.synthetic import SIZE, generate_all
+from lineclean.synthetic import EXPECTED_TOPOLOGY, SIZE, generate_all
+
+
+def test_every_case_has_expected_topology():
+    assert EXPECTED_TOPOLOGY.keys() == generate_all().keys()
 
 
 def test_all_cases_are_rgba_of_same_size():

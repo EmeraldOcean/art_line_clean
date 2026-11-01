@@ -23,6 +23,7 @@ uv run python -m lineclean .\samples\input\rough.png -o .\output\rough_clean.png
 ```powershell
 uv run pytest                                          # 테스트
 uv run python -m lineclean.synthetic .\samples\synthetic  # 합성 테스트 이미지 생성 (기존 파일은 건너뜀)
+uv run python experiments\m1_extract.py                 # M1 선 그래프 추출 실험 → output\m1\
 ```
 
 ## 주요 기능 (계획)

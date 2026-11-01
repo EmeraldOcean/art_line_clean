@@ -148,6 +148,28 @@ def generate_all() -> dict[str, np.ndarray]:
     return cases
 
 
+# 사람이 기대하는 정답 위상: (끝점 수, 분기점 차수 목록, 엣지 수).
+# 덧그림은 선 하나, 짧은 선이 긴 선 끝에 이어진 것은 꺾인 선 하나가 정답이다.
+# M1에서는 추출 결과와의 차이를 보고하는 데만 쓴다.
+EXPECTED_TOPOLOGY: dict[str, tuple[int, list[int], int]] = {
+    "line": (2, [], 1),
+    "curve": (2, [], 1),
+    "overdraw2_gap0": (2, [], 1),
+    "overdraw2_gap1": (2, [], 1),
+    "overdraw2_gap3": (2, [], 1),
+    "overdraw3_gap1": (2, [], 1),
+    "separate_parallel": (4, [], 2),
+    "cross_x": (4, [4], 4),
+    "junction_t": (3, [3], 3),
+    "branch_y": (3, [3], 3),
+    "short_long": (2, [], 1),
+    "wobbly_curve": (2, [], 1),
+    "sharp_corner": (2, [], 1),
+    "faint_thin": (2, [], 1),
+    "tapered": (2, [], 1),
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="합성 테스트 이미지를 PNG로 저장한다.")
     parser.add_argument("out_dir", type=Path)

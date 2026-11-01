@@ -73,6 +73,34 @@ def _over_checker(rgba: np.ndarray) -> Image.Image:
     return Image.alpha_composite(_checker(w, h), Image.fromarray(np.ascontiguousarray(rgba)))
 
 
+EDGE_COLORS = ((31, 119, 180), (255, 127, 14), (148, 103, 189), (140, 86, 75), (227, 119, 194), (23, 190, 207))
+ENDPOINT_COLOR = (0, 170, 0)
+JUNCTION_COLOR = (220, 0, 0)
+
+
+def graph_overlay(rgba: np.ndarray, graph, scale: int = 1) -> Image.Image:
+    """선 그래프 시각화: 흰 바탕에 원본을 옅게(30%) 깔고, 엣지는 색을 바꿔 가며, 끝점은 초록·분기점은 빨강 점."""
+    h, w = rgba.shape[:2]
+    faint = rgba.copy()
+    faint[..., 3] = (faint[..., 3].astype(np.uint16) * 3 // 10).astype(np.uint8)
+    white = Image.new("RGBA", (w, h), (255, 255, 255, 255))
+    base = np.array(Image.alpha_composite(white, Image.fromarray(faint)).convert("RGB"))
+
+    for e in graph.edges:
+        base[e.path[:, 0], e.path[:, 1]] = EDGE_COLORS[e.id % len(EDGE_COLORS)]
+    img = Image.fromarray(base)
+    if scale != 1:
+        img = img.resize((w * scale, h * scale), Image.Resampling.NEAREST)
+
+    draw = ImageDraw.Draw(img)
+    r = max(2, scale + 1)
+    for n in graph.nodes:
+        cy, cx = ((v + 0.5) * scale for v in n.yx)
+        color = ENDPOINT_COLOR if n.kind == "endpoint" else JUNCTION_COLOR
+        draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=color, width=max(1, scale // 2))
+    return img
+
+
 def make_sheet(before: np.ndarray, after: np.ndarray) -> Image.Image:
     """[input | output | diff] 비교 시트. 축소하지 않고 원래 픽셀 크기로 나란히 놓는다.
 

@@ -17,6 +17,14 @@ uv run python -m lineclean .\samples\input\rough.png -o .\output\rough_clean.png
 # 비교 시트(입력 | 출력 | 차이)는 output\ 에 함께 저장된다.
 ```
 
+현재(M0)는 처리 단계가 항등(그대로 복사)이다. 입출력·원본 보호·비교 시트만 동작한다.
+
+## 개발 (PowerShell)
+```powershell
+uv run pytest                                          # 테스트
+uv run python -m lineclean.synthetic .\samples\synthetic  # 합성 테스트 이미지 생성 (기존 파일은 건너뜀)
+```
+
 ## 주요 기능 (계획)
 - 덧그은 선을 대표 선 하나로 정리
 - 미세한 떨림 완화 (형태는 유지)

@@ -1,0 +1,27 @@
+[project]
+name = "lineclean"
+version = "0.1.0"
+description = "러프 RGBA PNG를 원본 형태를 보존한 채 선화로 정리하는 로컬 도구"
+authors = [
+    { name = "EmeraldOcean", email = "rapaella929@naver.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.4.6",
+    "pillow>=13.0.0",
+]
+
+[project.scripts]
+lineclean = "lineclean.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.16,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

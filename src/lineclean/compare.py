@@ -146,6 +146,29 @@ def merge_overlay(rgba: np.ndarray, result, scale: int = 2) -> Image.Image:
     return img
 
 
+TOPO_COLORS = {"X": (220, 0, 0), "T/Y": (255, 140, 0), "끝점": (0, 170, 0), "기타": (150, 0, 200)}
+
+
+def topology_overlay(rgba: np.ndarray, graph, strokes, node_class, scale: int = 2) -> Image.Image:
+    """위상 시각화: 획마다 다른 색, X는 빨강·T/Y는 주황·끝점은 초록·기타(차수 5 이상)는 보라 동그라미."""
+    h, w = rgba.shape[:2]
+    faint = rgba.copy()
+    faint[..., 3] = (faint[..., 3].astype(np.uint16) * 3 // 10).astype(np.uint8)
+    white = Image.new("RGBA", (w, h), (255, 255, 255, 255))
+    base = np.array(Image.alpha_composite(white, Image.fromarray(faint)).convert("RGB"))
+    for s in strokes:
+        base[s.path[:, 0], s.path[:, 1]] = EDGE_COLORS[s.id % len(EDGE_COLORS)]
+    img = Image.fromarray(base).resize((w * scale, h * scale), Image.Resampling.NEAREST)
+    draw = ImageDraw.Draw(img)
+    r = scale + 2
+    for n in graph.nodes:
+        if graph.degree[n.id] == 0:
+            continue
+        cy, cx = ((v + 0.5) * scale for v in n.yx)
+        draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=TOPO_COLORS[node_class(graph, n)], width=2)
+    return img
+
+
 def make_sheet(before: np.ndarray, after: np.ndarray) -> Image.Image:
     """[input | output | diff] 비교 시트. 축소하지 않고 원래 픽셀 크기로 나란히 놓는다.
 

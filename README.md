@@ -28,7 +28,10 @@ uv run python -m lineclean .\samples\input\rough.png -o .\output\step1.png --mer
 uv run python -m lineclean .\samples\input\rough.png -o .\output\step2.png --merge-ids 3,7,12
 ```
 
-후보 번호는 같은 입력·같은 설정이면 항상 같다. 설정을 바꾸면 1단계부터 다시 확인한다.
+처리 후에는 항상 위상 검사(처리 영역 밖의 교차·분기·끝점이 그대로인지)를 출력한다.
+`--topology-overlay`를 주면 획과 교차점(X 빨강, T/Y 주황, 끝점 초록)을 그린 `<출력>_topology.png`도 저장한다.
+
+후보 번호는 같은 입력·같은 설정·같은 버전이면 항상 같다. 설정을 바꾸면 1단계부터 다시 확인한다.
 고른 후보라도 안전 검사(대표선이 한 줄인지, 원본 잉크 밖에 그리지 않는지)에 걸리면 합치지 않고 이유를 출력한다.
 
 ## 개발 (PowerShell)

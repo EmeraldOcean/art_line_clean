@@ -12,7 +12,9 @@ import csv
 import io as stdio
 from pathlib import Path
 
-from lineclean.compare import make_sheet, merge_overlay, nongeneration_violations
+import numpy as np
+
+from lineclean.compare import dilate, make_sheet, merge_overlay, nongeneration_violations, topology_overlay
 from lineclean.io import (
     OutputPathError,
     UnsupportedImageError,
@@ -21,6 +23,7 @@ from lineclean.io import (
     load_rgba,
     save_rgba,
 )
+from lineclean.junction import compare_topology, node_class, resolved_graph, topology
 from lineclean.merge import decisions_table, merge_overdraws
 
 EXIT_OK = 0
@@ -28,6 +31,7 @@ EXIT_INTEGRITY = 1  # 원본이 바뀌었거나 비생성 검사 실패
 EXIT_USAGE = 2  # 경로·입력 오류
 
 NONGENERATION_D = 2  # 고정 허용치 (DECISIONS D-7)
+TOPOLOGY_IGNORE_PX = 6  # 바뀐 픽셀에서 이 거리 안의 노드는 위상 검사에서 뺀다 (D-11)
 
 
 def default_sheet_path(output: Path) -> Path:
@@ -75,8 +79,12 @@ def parse_ids(text: str) -> set[int]:
     return ids
 
 
+def topology_overlay_path(output: Path) -> Path:
+    return output.with_name(f"{output.stem}_topology.png")
+
+
 def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: bool = False,
-        merge_ids: set[int] | None = None) -> int:
+        merge_ids: set[int] | None = None, topo_overlay: bool = False) -> int:
     if not input_path.is_file():
         print(f"입력 파일이 없습니다: {input_path}")
         return EXIT_USAGE
@@ -86,6 +94,8 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
     extra = [p for p in (sheet_path,) if p is not None]
     if merge:
         extra += [merge_log_path(output_path), merge_overlay_path(output_path)]
+    if topo_overlay:
+        extra.append(topology_overlay_path(output_path))
     try:
         # 하나라도 쓸 수 없으면 아무것도 쓰지 않는다.
         targets = [output_path, *extra]
@@ -112,6 +122,10 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
         if merge_result is not None:
             _write_new(merge_log_path(output_path), _csv_bytes(decisions_table(merge_result)))
             _write_new(merge_overlay_path(output_path), _png_bytes(merge_overlay(original, merge_result)))
+        if topo_overlay:
+            graph, _, strokes = resolved_graph(result)
+            _write_new(topology_overlay_path(output_path),
+                       _png_bytes(topology_overlay(result, graph, strokes, node_class)))
     except (OutputPathError, UnsupportedImageError) as e:
         print(f"오류: {e}")
         return EXIT_USAGE
@@ -134,6 +148,20 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
     print(f"비생성 검사 (d={NONGENERATION_D}px): 위반 {violations}픽셀")
     if violations:
         status = EXIT_INTEGRITY
+
+    # 위상 검사: 처리로 바뀐 픽셀 근처(의도한 변화)를 빼고 X/T/Y·끝점이 그대로인지 본다 (D-11)
+    before = topology(original)
+    after = before if np.array_equal(original, result) else topology(result)
+    changed = dilate(np.any(original != result, axis=-1), TOPOLOGY_IGNORE_PX)
+    problems = compare_topology(before, after, ignore=changed)
+    counts = ", ".join(f"{k} {v}" for k, v in after.counts().items())
+    if problems:
+        print(f"위상 검사: 처리 영역 밖에서 {len(problems)}곳 바뀜 ({counts})")
+        for m in problems[:10]:
+            print(f"  {m}")
+        status = EXIT_INTEGRITY
+    else:
+        print(f"위상 검사: 처리 영역 밖 변화 없음 ({counts})")
     return status
 
 
@@ -149,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
                              "<출력>_merge_overlay.png(후보 번호 표시)도 저장")
     parser.add_argument("--merge-ids", metavar="N,N,...",
                         help="오버레이에 표시된 후보 중 이 번호만 병합 (자동 병합은 하지 않음)")
+    parser.add_argument("--topology-overlay", action="store_true",
+                        help="<출력>_topology.png 저장: 획별 색, X·T/Y·끝점 표시")
     args = parser.parse_args(argv)
 
     try:
@@ -157,4 +187,5 @@ def main(argv: list[str] | None = None) -> int:
         print(f"오류: {e}")
         return EXIT_USAGE
     sheet_path = None if args.no_sheet else (args.sheet or default_sheet_path(args.output))
-    return run(args.input, args.output, sheet_path, merge=args.merge, merge_ids=merge_ids)
+    return run(args.input, args.output, sheet_path, merge=args.merge, merge_ids=merge_ids,
+               topo_overlay=args.topology_overlay)

@@ -39,10 +39,24 @@ def _end_direction(path: np.ndarray, at_start: bool) -> np.ndarray:
     return v / n if n > 0 else v
 
 
-def build_strokes(graph: StrokeGraph, max_deg: float = MAX_CONTINUATION_DEG) -> list[Stroke]:
+def build_strokes(
+    graph: StrokeGraph,
+    max_deg: float = MAX_CONTINUATION_DEG,
+    forced_pairs: dict[int, list[tuple[int, int]]] | None = None,
+) -> list[Stroke]:
+    """엣지를 획으로 엮는다. forced_pairs(노드 id → 이어질 엣지 짝)는 그 노드에서 먼저 짝짓는다.
+
+    교차 정리(junction.resolve_crossings)에서 다리 너머로 이어진다고 판정한 짝을 넘기는 데 쓴다.
+    """
     edges = {e.id: e for e in graph.edges}
     # 엣지 끝 (edge_id, 0=시작 / 1=끝) → 이어지는 다른 엣지 끝
     link: dict[tuple[int, int], tuple[int, int]] = {}
+    for nid, pairs in (forced_pairs or {}).items():
+        for a, b in pairs:
+            ea = (a, 0 if edges[a].nodes[0] == nid else 1)
+            eb = (b, 0 if edges[b].nodes[0] == nid else 1)
+            if ea not in link and eb not in link:
+                link[ea], link[eb] = eb, ea
 
     ends_at: dict[int, list[tuple[int, int]]] = {}
     for e in graph.edges:

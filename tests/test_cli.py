@@ -110,5 +110,25 @@ def test_bad_merge_ids_write_nothing(tmp_path, cases, ids):
     assert not (tmp_path / "out").exists() or not any((tmp_path / "out").iterdir())
 
 
+def test_identity_reports_no_topology_change(tmp_path, cases, capsys):
+    src = save_rgba(cases["y_then_cross"], tmp_path / "in" / "y.png")
+    assert main([str(src), "-o", str(tmp_path / "out" / "y.png")]) == EXIT_OK
+    assert "위상 검사: 처리 영역 밖 변화 없음 (X 2, T/Y 1, 끝점 5, 기타 0)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", sorted(generate_all()))
+def test_merge_keeps_topology_outside_processed_area(tmp_path, cases, name, capsys):
+    src = save_rgba(cases[name], tmp_path / "in" / f"{name}.png")
+    assert main([str(src), "-o", str(tmp_path / "out" / f"{name}.png"), "--merge"]) == EXIT_OK
+    assert "위상 검사: 처리 영역 밖 변화 없음" in capsys.readouterr().out
+
+
+def test_topology_overlay_written(tmp_path, cases):
+    src = save_rgba(cases["cross_30"], tmp_path / "in" / "c.png")
+    out = tmp_path / "out" / "c.png"
+    assert main([str(src), "-o", str(out), "--topology-overlay"]) == EXIT_OK
+    assert (tmp_path / "out" / "c_topology.png").is_file()
+
+
 def test_missing_input(tmp_path):
     assert main([str(tmp_path / "nope.png"), "-o", str(tmp_path / "o.png")]) == EXIT_USAGE

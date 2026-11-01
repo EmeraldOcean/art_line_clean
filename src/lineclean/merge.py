@@ -28,6 +28,7 @@ from skimage.morphology import disk, skeletonize
 
 from lineclean.compare import dilate
 from lineclean.graph import StrokeGraph, extract_graph, graph_from_skeleton, graph_stats, prune_spurs
+from lineclean.junction import resolve_crossings
 from lineclean.mask import ink_mask
 from lineclean.render import stroke_coverage
 from lineclean.strokes import Stroke, build_strokes
@@ -371,7 +372,9 @@ def merge_overdraws(
     ink = ink_mask(rgba, threshold=p.ink_threshold)
     graph, dist = extract_graph(rgba, ink)
     graph = prune_spurs(graph, dist, alpha, p.prune_factor)
-    strokes = build_strokes(graph)
+    # 얕은 X 교차를 교차점 하나로 합쳐, 획이 교차를 곧게 지나도록 엮는다 (M3)
+    graph, crossings = resolve_crossings(graph)
+    strokes = build_strokes(graph, forced_pairs={c.node: c.pairs for c in crossings})
 
     owner_edge, owner_node = _ownership(graph, ink)
     samples = _sample_strokes(strokes, _orientation(alpha, p.orientation_sigma))

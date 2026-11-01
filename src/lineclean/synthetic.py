@@ -139,6 +139,25 @@ def generate_all() -> dict[str, np.ndarray]:
             (trim(arc, 0.0, 0.65), STROKE_WIDTH),
             (trim(offset(arc, STROKE_WIDTH + 3.0), 0.35, 1.0), STROKE_WIDTH),
         ]),
+        # 30°로 교차하는 두 선
+        "cross_30": render([
+            (polyline((20, 80), (140, 80)), STROKE_WIDTH),
+            (polyline((20, 80 - 60 * np.tan(np.radians(30))), (140, 80 + 60 * np.tan(np.radians(30)))),
+             STROKE_WIDTH),
+        ]),
+        # 가로선 위에 T 두 개가 8px 간격으로 붙어 있다: X로 합치면 안 된다
+        "two_t_close": render([
+            (polyline((20, 50), (140, 50)), STROKE_WIDTH),
+            (polyline((76, 140), (76, 50)), STROKE_WIDTH),
+            (polyline((84, 50), (84, 10)), STROKE_WIDTH),
+        ]),
+        # Y 분기 바로 옆을 다른 선이 지나간다: Y 하나 + X 하나
+        "y_then_cross": render([
+            (polyline((80, 145), (80, 85)), STROKE_WIDTH),
+            (polyline((80, 85), (35, 20)), STROKE_WIDTH),
+            (polyline((80, 85), (125, 20)), STROKE_WIDTH),
+            (polyline((20, 55), (140, 55)), STROKE_WIDTH),
+        ]),
     }
     return cases
 
@@ -188,6 +207,9 @@ EXPECTED_TOPOLOGY: dict[str, tuple[int, list[int], int]] = {
     "partial_overdraw": (2, [], 1),
     "shallow_merge": (4, [], 2),
     "double_partial": (2, [], 1),
+    "cross_30": (4, [4], 4),
+    "two_t_close": (4, [3, 3], 5),
+    "y_then_cross": (5, [3, 4, 4], 8),
 }
 
 

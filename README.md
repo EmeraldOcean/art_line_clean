@@ -28,6 +28,13 @@ uv run python -m lineclean .\samples\input\rough.png -o .\output\step1.png --mer
 uv run python -m lineclean .\samples\input\rough.png -o .\output\step2.png --merge-ids 3,7,12
 ```
 
+`--smooth`를 주면 떨림 완화(M4)를 병합 뒤에 적용한다. 선을 새로 그리지 않고 원본 픽셀을 최대 1px 옮기므로
+연필 질감은 그대로 남는다. 분기점·교차점·끝점·모서리는 움직이지 않는다.
+
+```powershell
+uv run python -m lineclean .\samples\input\rough.png -o .\output\clean.png --merge-ids 3,7 --smooth
+```
+
 처리 후에는 항상 위상 검사(처리 영역 밖의 교차·분기·끝점이 그대로인지)를 출력한다.
 `--topology-overlay`를 주면 획과 교차점(X 빨강, T/Y 주황, 끝점 초록)을 그린 `<출력>_topology.png`도 저장한다.
 

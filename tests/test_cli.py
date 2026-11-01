@@ -130,5 +130,14 @@ def test_topology_overlay_written(tmp_path, cases):
     assert (tmp_path / "out" / "c_topology.png").is_file()
 
 
+@pytest.mark.parametrize("extra", [["--smooth"], ["--merge-ids", "1", "--smooth"]])
+def test_smooth_passes_strict_topology_check(tmp_path, cases, extra, capsys):
+    src = save_rgba(cases["overdraw2_gap3"], tmp_path / "in" / "s.png")
+    assert main([str(src), "-o", str(tmp_path / "out" / "s.png"), *extra]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "평활 위상 검사: 변화 없음" in out
+    assert "떨림 지표" in out
+
+
 def test_missing_input(tmp_path):
     assert main([str(tmp_path / "nope.png"), "-o", str(tmp_path / "o.png")]) == EXIT_USAGE

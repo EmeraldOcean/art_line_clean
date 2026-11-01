@@ -179,7 +179,8 @@ def _diverging(base: Path2D) -> Path2D:
 # 덧그림 케이스의 정답 중심선 (x, y). 병합 결과의 위치 오차를 재는 데 쓴다.
 def base_paths() -> dict[str, Path2D]:
     arc = bezier((20, 120), (80, 10), (140, 110))
-    return {name: arc for name in ("overdraw2_gap0", "overdraw2_gap1", "overdraw2_gap3", "overdraw3_gap1")}
+    names = ("overdraw2_gap0", "overdraw2_gap1", "overdraw2_gap3", "overdraw3_gap1", "wobbly_curve")
+    return {name: arc for name in names}
 
 
 # 사람이 기대하는 정답 위상: (끝점 수, 분기점 차수 목록, 엣지 수).

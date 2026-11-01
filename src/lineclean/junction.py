@@ -211,8 +211,10 @@ def topology(rgba: np.ndarray) -> Topology:
     return Topology(nodes, float(np.median(np.maximum(2 * radii - 1, 1.0))))
 
 
-def compare_topology(before: Topology, after: Topology, ignore: np.ndarray | None = None) -> list[str]:
-    """종류별로 노드 위치를 맞춰(반경 2w) 짝이 없는 노드를 "사라짐 / 새로 생김"으로 보고한다.
+def topology_changes(
+    before: Topology, after: Topology, ignore: np.ndarray | None = None
+) -> list[tuple[str, str, tuple[float, float]]]:
+    """종류별로 노드 위치를 맞춰(반경 2w) 짝이 없는 노드를 (종류, "사라짐"/"새로 생김", 위치)로 돌려준다.
 
     ignore(bool 마스크)에 놓인 노드는 보지 않는다. 처리로 의도적으로 바뀐 영역을 빼는 데 쓴다.
     """
@@ -223,7 +225,7 @@ def compare_topology(before: Topology, after: Topology, ignore: np.ndarray | Non
             return t.nodes
         return [n for n in t.nodes if not ignore[int(round(n.yx[0])), int(round(n.yx[1]))]]
 
-    messages = []
+    changes = []
     b_nodes, a_nodes = kept(before), kept(after)
     for kind in (X, TY, END, OTHER):
         b = [n for n in b_nodes if n.kind == kind]
@@ -232,9 +234,14 @@ def compare_topology(before: Topology, after: Topology, ignore: np.ndarray | Non
             if not src:
                 continue
             if not dst:
-                messages += [f"{kind} {label} (y={n.yx[0]:.0f}, x={n.yx[1]:.0f})" for n in src]
+                changes += [(kind, label, n.yx) for n in src]
                 continue
             d, _ = cKDTree([n.yx for n in dst]).query([n.yx for n in src])
-            messages += [f"{kind} {label} (y={n.yx[0]:.0f}, x={n.yx[1]:.0f})"
-                         for n, dist in zip(src, d) if dist > radius]
-    return messages
+            changes += [(kind, label, n.yx) for n, dist in zip(src, d) if dist > radius]
+    return changes
+
+
+def compare_topology(before: Topology, after: Topology, ignore: np.ndarray | None = None) -> list[str]:
+    """topology_changes를 사람이 읽는 문장으로."""
+    return [f"{kind} {label} (y={yx[0]:.0f}, x={yx[1]:.0f})"
+            for kind, label, yx in topology_changes(before, after, ignore)]

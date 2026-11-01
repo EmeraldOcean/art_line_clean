@@ -1,6 +1,7 @@
 """명령행 진입점.
 
-기본은 항등(identity) 처리다. --merge를 주면 덧그은 선 병합(M2)을 켠다.
+기본은 항등(identity) 처리다. --merge를 주면 덧그은 선 병합(M2)을 켠다 (자동: 확실한 후보만).
+--merge-ids 3,7을 주면 오버레이에 번호로 표시된 후보 중 고른 것만 병합한다 (D-10).
 흐름: 입력 → 처리 → 출력 → 비교 시트(·병합 기록) → 무결성 검사.
 """
 
@@ -63,10 +64,23 @@ def _csv_bytes(rows: list[dict[str, object]]) -> bytes:
     return buf.getvalue().encode("utf-8-sig")
 
 
-def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: bool = False) -> int:
+def parse_ids(text: str) -> set[int]:
+    """'3,7,12' → {3, 7, 12}. 형식이 틀리면 ValueError."""
+    ids = set()
+    for part in text.split(","):
+        part = part.strip()
+        if not part.isdigit() or int(part) < 1:
+            raise ValueError(f"후보 번호 형식이 틀렸습니다: '{part}' (예: --merge-ids 3,7,12)")
+        ids.add(int(part))
+    return ids
+
+
+def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: bool = False,
+        merge_ids: set[int] | None = None) -> int:
     if not input_path.is_file():
         print(f"입력 파일이 없습니다: {input_path}")
         return EXIT_USAGE
+    merge = merge or merge_ids is not None
 
     protected = [input_path.parent]
     extra = [p for p in (sheet_path,) if p is not None]
@@ -86,7 +100,10 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
             note = ", 색 정보는 버림" if info.color_discarded else ""
             print(f"알림: {info.source_mode} 입력을 밝기→알파 규칙으로 변환했습니다{note}.")
 
-        merge_result = merge_overdraws(original) if merge else None
+        try:
+            merge_result = merge_overdraws(original, select=merge_ids) if merge else None
+        except ValueError as e:
+            raise OutputPathError(str(e)) from None  # 아무것도 쓰기 전에 사용 오류로 끝낸다
         result = merge_result.rgba if merge_result else original.copy()
 
         save_rgba(result, output_path, protected)
@@ -103,7 +120,11 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
     for path in extra:
         print(f"기록: {path}")
     if merge_result is not None:
-        print(f"병합: {merge_result.merged_count}개 그룹")
+        candidates = [d for d in merge_result.decisions if d.candidate is not None]
+        print(f"병합: {merge_result.merged_count}개 / 후보 {len(candidates)}개 (번호는 오버레이와 기록 참고)")
+        for d in candidates:
+            if merge_ids is not None and d.candidate in merge_ids and not d.merged:
+                print(f"  후보 {d.candidate}: 고른 후보지만 병합하지 않음 — {d.reason}")
 
     status = EXIT_OK
     if file_sha256(input_path) != hash_before:
@@ -124,8 +145,16 @@ def main(argv: list[str] | None = None) -> int:
     sheet.add_argument("--sheet", type=Path, help="비교 시트 경로 (기본: <출력>_compare.png)")
     sheet.add_argument("--no-sheet", action="store_true", help="비교 시트를 만들지 않음")
     parser.add_argument("--merge", action="store_true",
-                        help="덧그은 선 병합 (M2). <출력>_merge_log.csv, <출력>_merge_overlay.png도 저장")
+                        help="덧그은 선 병합 (자동: 확실한 후보만). <출력>_merge_log.csv, "
+                             "<출력>_merge_overlay.png(후보 번호 표시)도 저장")
+    parser.add_argument("--merge-ids", metavar="N,N,...",
+                        help="오버레이에 표시된 후보 중 이 번호만 병합 (자동 병합은 하지 않음)")
     args = parser.parse_args(argv)
 
+    try:
+        merge_ids = parse_ids(args.merge_ids) if args.merge_ids is not None else None
+    except ValueError as e:
+        print(f"오류: {e}")
+        return EXIT_USAGE
     sheet_path = None if args.no_sheet else (args.sheet or default_sheet_path(args.output))
-    return run(args.input, args.output, sheet_path, merge=args.merge)
+    return run(args.input, args.output, sheet_path, merge=args.merge, merge_ids=merge_ids)

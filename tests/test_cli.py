@@ -87,5 +87,28 @@ def test_without_merge_overdraw_is_unchanged(tmp_path, cases):
     assert not (tmp_path / "out" / "od_merge_log.csv").exists()
 
 
+def test_merge_ids_merges_only_selected(tmp_path, cases):
+    src = save_rgba(cases["double_partial"], tmp_path / "in" / "dp.png")
+    auto = tmp_path / "out" / "auto.png"
+    assert main([str(src), "-o", str(auto), "--merge"]) == EXIT_OK
+    auto_result, _ = load_rgba(auto)
+    assert np.array_equal(auto_result, cases["double_partial"])  # 자동으로는 합치지 않음
+    log = (tmp_path / "out" / "auto_merge_log.csv").read_text(encoding="utf-8-sig")
+    assert log.splitlines()[0].split(",")[:3] == ["id", "candidate", "auto_ok"]
+
+    picked = tmp_path / "out" / "picked.png"
+    assert main([str(src), "-o", str(picked), "--merge-ids", "1"]) == EXIT_OK
+    picked_result, _ = load_rgba(picked)
+    assert not np.array_equal(picked_result, cases["double_partial"])
+
+
+@pytest.mark.parametrize("ids", ["99", "1,x", "0", ""])
+def test_bad_merge_ids_write_nothing(tmp_path, cases, ids):
+    src = save_rgba(cases["double_partial"], tmp_path / "in" / "dp.png")
+    out = tmp_path / "out" / "dp.png"
+    assert main([str(src), "-o", str(out), "--merge-ids", ids]) == EXIT_USAGE
+    assert not (tmp_path / "out").exists() or not any((tmp_path / "out").iterdir())
+
+
 def test_missing_input(tmp_path):
     assert main([str(tmp_path / "nope.png"), "-o", str(tmp_path / "o.png")]) == EXIT_USAGE

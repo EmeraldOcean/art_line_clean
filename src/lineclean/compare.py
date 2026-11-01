@@ -103,29 +103,46 @@ def graph_overlay(rgba: np.ndarray, graph, scale: int = 1) -> Image.Image:
 
 MERGED_SOURCE_COLOR = (150, 220, 150)  # 병합되어 지워진 원래 선
 MERGED_PATH_COLOR = (0, 120, 0)  # 대표 중간선
-SKIPPED_COLOR = (255, 140, 0)  # 건너뛴 후보
+SKIPPED_COLOR = (255, 140, 0)  # 병합하지 않은 후보
+LABEL_TEXT_COLOR = (0, 0, 0)
 
 
-def merge_overlay(rgba: np.ndarray, result, scale: int = 1) -> Image.Image:
-    """병합 판정 시각화: 병합된 원래 선은 연두, 대표 중간선은 진한 초록, 건너뛴 후보 엣지는 주황."""
+def merge_overlay(rgba: np.ndarray, result, scale: int = 2) -> Image.Image:
+    """병합 판정 시각화: 병합된 원래 선은 연두, 대표 중간선은 진한 초록, 병합하지 않은 후보는 주황.
+
+    후보마다 번호를 흰 상자에 적는다. 사용자는 이 번호를 --merge-ids로 고른다.
+    """
     h, w = rgba.shape[:2]
     faint = rgba.copy()
     faint[..., 3] = (faint[..., 3].astype(np.uint16) * 3 // 10).astype(np.uint8)
     white = Image.new("RGBA", (w, h), (255, 255, 255, 255))
     base = np.array(Image.alpha_composite(white, Image.fromarray(faint)).convert("RGB"))
 
+    candidates = [d for d in result.decisions if d.candidate is not None]
     edges = {e.id: e for e in result.graph.edges}
-    for d in result.decisions:
+    for d in candidates:
         color = MERGED_SOURCE_COLOR if d.merged else SKIPPED_COLOR
         for eid in d.edge_ids:
             path = edges[eid].path
             base[path[:, 0], path[:, 1]] = color
-    for d in result.decisions:
+    for d in candidates:
         if d.merged and d.path is not None:
             base[d.path[:, 0], d.path[:, 1]] = MERGED_PATH_COLOR
     img = Image.fromarray(base)
     if scale != 1:
         img = img.resize((w * scale, h * scale), Image.Resampling.NEAREST)
+
+    draw = ImageDraw.Draw(img)
+    for d in candidates:
+        pts = np.concatenate([edges[eid].path for eid in d.edge_ids])
+        # 후보 선 위가 아니라 옆에 적는다: 가운데 점에서 오른쪽 위로 비켜서
+        cy, cx = pts[np.argsort(pts[:, 0])[len(pts) // 2]]
+        x, y = (cx + 4) * scale, (cy - 6) * scale
+        label = str(d.candidate)
+        left, top, right, bottom = draw.textbbox((x, y), label)
+        draw.rectangle((left - 2, top - 1, right + 2, bottom + 1), fill=(255, 255, 255),
+                       outline=MERGED_PATH_COLOR if d.merged else SKIPPED_COLOR)
+        draw.text((x, y), label, fill=LABEL_TEXT_COLOR)
     return img
 
 

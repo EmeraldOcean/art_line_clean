@@ -17,12 +17,19 @@ uv run python -m lineclean .\samples\input\rough.png -o .\output\rough_clean.png
 # 비교 시트(입력 | 출력 | 차이)는 output\ 에 함께 저장된다.
 ```
 
-기본은 항등(그대로 복사) 처리다. `--merge`를 주면 덧그은 선 병합(M2, 개발 중)을 켜고,
-판정 기록(`<출력>_merge_log.csv`)과 병합 오버레이(`<출력>_merge_overlay.png`)도 함께 저장한다.
+기본은 항등(그대로 복사) 처리다. 덧그은 선 병합(M2)은 두 단계로 쓴다.
 
 ```powershell
-uv run python -m lineclean .\samples\input\rough.png -o .\output\rough_merged.png --merge
+# 1) 후보 보기: 확실한 덧그림(겹침 80% 이상)만 자동으로 합치고, 나머지 후보에는 번호를 붙여 보여 준다
+uv run python -m lineclean .\samples\input\rough.png -o .\output\step1.png --merge
+#    → output\step1_merge_overlay.png (후보 번호), output\step1_merge_log.csv (후보별 근거)
+
+# 2) 고르기: 합칠 번호만 지정한다 (자동 병합은 하지 않음, 원본에서 다시 계산)
+uv run python -m lineclean .\samples\input\rough.png -o .\output\step2.png --merge-ids 3,7,12
 ```
+
+후보 번호는 같은 입력·같은 설정이면 항상 같다. 설정을 바꾸면 1단계부터 다시 확인한다.
+고른 후보라도 안전 검사(대표선이 한 줄인지, 원본 잉크 밖에 그리지 않는지)에 걸리면 합치지 않고 이유를 출력한다.
 
 ## 개발 (PowerShell)
 ```powershell

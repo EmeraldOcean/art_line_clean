@@ -127,8 +127,28 @@ def generate_all() -> dict[str, np.ndarray]:
         ]),
         # 다른 선을 따라 나란히 가다가 갈라지는 선 (머리카락이 얼굴 윤곽을 따라가다 벗어나는 유형)
         "touch_and_diverge": render([(arc, STROKE_WIDTH), (trim(_diverging(arc), 0.0, 0.75), STROKE_WIDTH)]),
+        # 긴 곡선의 가운데 40% 구간만 3px 간격으로 덧그은 짧은 획
+        "partial_overdraw": render([
+            (arc, STROKE_WIDTH),
+            (trim(offset(arc, STROKE_WIDTH + 3.0), 0.3, 0.7), STROKE_WIDTH),
+        ]),
+        # 서로 다른 두 선이 얕은 각도로 다가와 잠깐 붙어 가다가 갈라진다 (머리 윗부분 유형)
+        "shallow_merge": render([(arc, STROKE_WIDTH), (_shallow_partner(arc), STROKE_WIDTH)]),
+        # 두 획이 서로 엇갈려 가운데만 겹친다: 둘 다 일부만 덮인다 (어깨 2중선 유형)
+        "double_partial": render([
+            (trim(arc, 0.0, 0.65), STROKE_WIDTH),
+            (trim(offset(arc, STROKE_WIDTH + 3.0), 0.35, 1.0), STROKE_WIDTH),
+        ]),
     }
     return cases
+
+
+def _shallow_partner(base: Path2D) -> Path2D:
+    t = np.linspace(0.0, 1.0, len(base))
+    spacing = STROKE_WIDTH + 1.0
+    # t∈[0.35, 0.65]에서만 붙어 가고 양쪽으로는 벌어진다
+    away = np.clip(np.abs(t - 0.5) - 0.15, 0.0, None) * 80.0
+    return trim(offset(base, -(spacing + away)), 0.1, 0.9)
 
 
 def _diverging(base: Path2D) -> Path2D:
@@ -163,8 +183,11 @@ EXPECTED_TOPOLOGY: dict[str, tuple[int, list[int], int]] = {
     "faint_thin": (2, [], 1),
     "tapered": (2, [], 1),
     "shallow_cross": (4, [4], 4),
-    # 서로 다른 두 선으로 보는 것이 정답이지만 판단이 갈릴 수 있다. M2에서는 결과만 보고한다.
+    # 서로 다른 두 선으로 본다 (M2: 합치지 않음)
     "touch_and_diverge": (4, [], 2),
+    "partial_overdraw": (2, [], 1),
+    "shallow_merge": (4, [], 2),
+    "double_partial": (2, [], 1),
 }
 
 

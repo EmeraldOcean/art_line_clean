@@ -1,0 +1,15 @@
+# 결과물
+output/
+
+# Python / uv
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Claude Code 개인 설정
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db

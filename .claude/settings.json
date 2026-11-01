@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv sync:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "ask": [
+      "Bash(uv add:*)",
+      "Bash(uv remove:*)",
+      "Bash(git commit:*)"
+    ],
+    "deny": [
+      "Edit(/samples/input/**)",
+      "Bash(pip:*)",
+      "Bash(pip3:*)",
+      "Bash(python -m pip:*)",
+      "Bash(uv pip:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}

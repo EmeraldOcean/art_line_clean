@@ -1,6 +1,10 @@
 # 결과물
 output/
 
+# 실제 러프 원본은 로컬에만 보관 (폴더 자리만 커밋)
+samples/input/*
+!samples/input/.gitkeep
+
 # Python / uv
 .venv/
 __pycache__/

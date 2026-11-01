@@ -35,6 +35,13 @@ uv run python -m lineclean .\samples\input\rough.png -o .\output\step2.png --mer
 uv run python -m lineclean .\samples\input\rough.png -o .\output\clean.png --merge-ids 3,7 --smooth
 ```
 
+`--render`를 주면 맨 마지막에 깔끔한 선화로 다시 그린다(M5). 획마다 원본 굵기 변화와 잉크 양을 유지한 채
+연필 질감·들쭉날쭉한 가장자리·부스러기를 정리한다. 원본 잉크 밖에는 그리지 않는다.
+
+```powershell
+uv run python -m lineclean .\samples\input\rough.png -o .\output\clean.png --merge-ids 3,7 --smooth --render
+```
+
 처리 후에는 항상 위상 검사(처리 영역 밖의 교차·분기·끝점이 그대로인지)를 출력한다.
 `--topology-overlay`를 주면 획과 교차점(X 빨강, T/Y 주황, 끝점 초록)을 그린 `<출력>_topology.png`도 저장한다.
 

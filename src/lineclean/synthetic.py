@@ -158,8 +158,21 @@ def generate_all() -> dict[str, np.ndarray]:
             (polyline((80, 85), (125, 20)), STROKE_WIDTH),
             (polyline((20, 55), (140, 55)), STROKE_WIDTH),
         ]),
+        "pencil_texture": _pencil(rng, arc),
     }
     return cases
+
+
+def _pencil(rng: np.random.Generator, base: Path2D) -> np.ndarray:
+    """연필 질감 흉내: 들쭉날쭉한 굵기, 얼룩덜룩한 농도, 선 옆 옅은 부스러기(α < 16)."""
+    jag = smooth_noise(rng, 400, 0.8, 3)
+    rgba = render([(base, lambda t: STROKE_WIDTH + np.interp(t, np.linspace(0, 1, 400), jag))])
+    grain = rng.uniform(0.35, 1.0, rgba.shape[:2])
+    rgba[..., 3] = (rgba[..., 3] * grain).astype(np.uint8)
+    for y, x in rng.integers(20, 140, (12, 2)):
+        if rgba[y, x, 3] == 0:
+            rgba[y, x, 3] = 10
+    return rgba
 
 
 def _shallow_partner(base: Path2D) -> Path2D:
@@ -211,6 +224,7 @@ EXPECTED_TOPOLOGY: dict[str, tuple[int, list[int], int]] = {
     "cross_30": (4, [4], 4),
     "two_t_close": (4, [3, 3], 5),
     "y_then_cross": (5, [3, 4, 4], 8),
+    "pencil_texture": (2, [], 1),
 }
 
 

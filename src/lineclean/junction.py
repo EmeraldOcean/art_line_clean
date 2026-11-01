@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import ndimage
 from scipy.spatial import cKDTree
 
 from lineclean.graph import ENDPOINT, JUNCTION, Edge, Node, StrokeGraph, extract_graph, prune_spurs
@@ -238,6 +239,49 @@ def topology_changes(
                 continue
             d, _ = cKDTree([n.yx for n in dst]).query([n.yx for n in src])
             changes += [(kind, label, n.yx) for n, dist in zip(src, d) if dist > radius]
+    return changes
+
+
+def _closest_pair_midpoint(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
+    d, idx = cKDTree(b).query(a)
+    k = int(np.argmin(d))
+    mid = (a[k] + b[idx[k]]) / 2
+    return float(mid[0]), float(mid[1])
+
+
+def connectivity_changes(
+    before: np.ndarray, after: np.ndarray, threshold: float = 16, min_px: int = 4
+) -> list[tuple[str, tuple[float, float]]]:
+    """잉크(α ≥ threshold) 덩어리의 연결이 바뀐 곳: ("이어짐" | "끊김" | "사라짐" | "새로 생김", 위치).
+
+    골격 위상(X/T/Y)과 달리 가장자리 모양에 덜 민감하다. 다시 그리기처럼 가장자리만 바뀌는 처리에서
+    서로 다른 선이 붙거나(이어짐) 한 선이 끊기는지(끊김) 확인하는 데 쓴다. min_px 미만 덩어리는 보지 않는다.
+    """
+    eight = np.ones((3, 3), dtype=bool)
+    lb, nb = ndimage.label(before[..., 3] >= threshold, structure=eight)
+    la, na = ndimage.label(after[..., 3] >= threshold, structure=eight)
+    size_b = np.bincount(lb.ravel(), minlength=nb + 1)
+    size_a = np.bincount(la.ravel(), minlength=na + 1)
+    changes: list[tuple[str, tuple[float, float]]] = []
+
+    overlap = (lb > 0) & (la > 0)
+    pairs = np.unique(np.stack([lb[overlap], la[overlap]], axis=1), axis=0) if overlap.any() else np.zeros((0, 2), int)
+    for a_id in range(1, na + 1):
+        olds = [b for b in pairs[pairs[:, 1] == a_id, 0] if size_b[b] >= min_px]
+        if size_a[a_id] >= min_px and not len(pairs[pairs[:, 1] == a_id]):
+            changes.append(("새로 생김", tuple(np.argwhere(la == a_id).mean(axis=0))))
+        if len(olds) >= 2:
+            pts = [np.argwhere(lb == b) for b in olds]
+            changes.append(("이어짐", _closest_pair_midpoint(pts[0], np.vstack(pts[1:]))))
+    for b_id in range(1, nb + 1):
+        if size_b[b_id] < min_px:
+            continue
+        news = [a for a in pairs[pairs[:, 0] == b_id, 1] if size_a[a] >= min_px]
+        if not len(pairs[pairs[:, 0] == b_id]):
+            changes.append(("사라짐", tuple(np.argwhere(lb == b_id).mean(axis=0))))
+        elif len(news) >= 2:
+            pts = [np.argwhere((la == a) & (lb == b_id)) for a in news]
+            changes.append(("끊김", _closest_pair_midpoint(pts[0], np.vstack(pts[1:]))))
     return changes
 
 

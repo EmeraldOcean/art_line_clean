@@ -141,3 +141,12 @@ def test_smooth_passes_strict_topology_check(tmp_path, cases, extra, capsys):
 
 def test_missing_input(tmp_path):
     assert main([str(tmp_path / "nope.png"), "-o", str(tmp_path / "o.png")]) == EXIT_USAGE
+
+
+@pytest.mark.parametrize("extra", [["--render"], ["--merge-ids", "1", "--smooth", "--render"]])
+def test_render_passes_connectivity_check(tmp_path, cases, extra, capsys):
+    src = save_rgba(cases["overdraw2_gap3"], tmp_path / "in" / "r.png")
+    assert main([str(src), "-o", str(tmp_path / "out" / "r.png"), *extra]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "다시 그리기 연결 검사: 변화 없음" in out
+    assert "잉크 총량 원본 대비" in out

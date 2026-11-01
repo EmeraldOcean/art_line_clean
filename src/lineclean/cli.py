@@ -23,8 +23,9 @@ from lineclean.io import (
     load_rgba,
     save_rgba,
 )
-from lineclean.junction import compare_topology, node_class, resolved_graph, topology
+from lineclean.junction import compare_topology, connectivity_changes, node_class, resolved_graph, topology
 from lineclean.merge import decisions_table, merge_overdraws
+from lineclean.render import render_clean
 from lineclean.smooth import jitter_index, smooth_lines
 
 EXIT_OK = 0
@@ -85,7 +86,8 @@ def topology_overlay_path(output: Path) -> Path:
 
 
 def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: bool = False,
-        merge_ids: set[int] | None = None, topo_overlay: bool = False, smooth: bool = False) -> int:
+        merge_ids: set[int] | None = None, topo_overlay: bool = False, smooth: bool = False,
+        render: bool = False) -> int:
     if not input_path.is_file():
         print(f"입력 파일이 없습니다: {input_path}")
         return EXIT_USAGE
@@ -120,6 +122,10 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
         smooth_result = smooth_lines(result) if smooth else None
         if smooth_result is not None:
             result = smooth_result.rgba
+        render_input = result
+        render_result = render_clean(result) if render else None
+        if render_result is not None:
+            result = render_result.rgba
 
         save_rgba(result, output_path, protected)
         if sheet_path is not None:
@@ -149,6 +155,9 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
         print(f"평활: 획 {smooth_result.strokes}개, 모서리 {smooth_result.corners}곳, "
               f"옮긴 픽셀 {smooth_result.moved_px}, 최대 이동 {smooth_result.max_shift_px:.2f}px, "
               f"떨림 지표 {smooth_result.jitter_before:.3f} → {jitter_after:.3f}px")
+    if render_result is not None:
+        print(f"다시 그리기: 획 {render_result.strokes}개 (원본 유지 {render_result.kept_strokes}), "
+              f"잉크 총량 원본 대비 {render_result.mass_ratio:.2f}, 비생성 잘라냄 {render_result.clipped_px}px")
 
     status = EXIT_OK
     if file_sha256(input_path) != hash_before:
@@ -158,6 +167,17 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
     print(f"비생성 검사 (d={NONGENERATION_D}px): 위반 {violations}픽셀")
     if violations:
         status = EXIT_INTEGRITY
+
+    # 다시 그리기는 가장자리를 전부 바꾸므로 골격 위상(X/T/Y)이 아니라 잉크 연결로 확인한다 (D-14)
+    if render_result is not None:
+        conn = connectivity_changes(render_input, result)
+        if conn:
+            print(f"다시 그리기 연결 검사: {len(conn)}곳 바뀜")
+            for kind, (y, x) in conn[:10]:
+                print(f"  {kind} (y={y:.0f}, x={x:.0f})")
+            status = EXIT_INTEGRITY
+        else:
+            print("다시 그리기 연결 검사: 변화 없음 (선이 새로 붙거나 끊기지 않음)")
 
     # 위상 검사: 처리로 바뀐 픽셀 근처(의도한 변화)를 빼고 X/T/Y·끝점이 그대로인지 본다 (D-11)
     before = topology(original)
@@ -175,7 +195,7 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
 
     # 평활은 노드를 고정하므로 평활 전후 위상이 영역 제외 없이 완전히 같아야 한다 (D-12)
     if smooth_result is not None:
-        strict = compare_topology(topology(smooth_input), after)
+        strict = compare_topology(topology(smooth_input), topology(smooth_result.rgba))
         if strict:
             print(f"평활 위상 검사: {len(strict)}곳 바뀜")
             for m in strict[:10]:
@@ -200,6 +220,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="오버레이에 표시된 후보 중 이 번호만 병합 (자동 병합은 하지 않음)")
     parser.add_argument("--smooth", action="store_true",
                         help="떨림 완화 (M4): 중심선을 다듬고 원본 픽셀을 최대 1px 옮김. 병합 뒤에 적용")
+    parser.add_argument("--render", action="store_true",
+                        help="깔끔한 선화로 다시 그리기 (M5): 획별 굵기·농도를 유지한 매끈한 선. 맨 마지막에 적용")
     parser.add_argument("--topology-overlay", action="store_true",
                         help="<출력>_topology.png 저장: 획별 색, X·T/Y·끝점 표시")
     args = parser.parse_args(argv)
@@ -211,4 +233,4 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
     sheet_path = None if args.no_sheet else (args.sheet or default_sheet_path(args.output))
     return run(args.input, args.output, sheet_path, merge=args.merge, merge_ids=merge_ids,
-               topo_overlay=args.topology_overlay, smooth=args.smooth)
+               topo_overlay=args.topology_overlay, smooth=args.smooth, render=args.render)

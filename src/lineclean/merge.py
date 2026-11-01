@@ -479,7 +479,8 @@ def merge_overdraws(
         skel_px = np.concatenate([strokes[m].path for m in members])
         color = np.median(rgba[skel_px[:, 0], skel_px[:, 1], :3], axis=0)
 
-        cov = stroke_coverage([(path[:, ::-1], stroke_width)], (0, 0, x1 - x0, y1 - y0)) / 255.0
+        # 픽셀 인덱스 i의 중심은 붓 좌표로 i + 0.5다
+        cov = stroke_coverage([(path[:, ::-1] + 0.5, stroke_width)], (0, 0, x1 - x0, y1 - y0)) / 255.0
         s = cov * ink_alpha / 255.0
         if ((s > 0) & ~allowed[y0:y1, x0:x1]).any():
             dec.reason = f"비생성 위반 (원본 잉크 + {p.nongeneration_d}px 밖에 그려짐)"

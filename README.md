@@ -42,6 +42,20 @@ uv run python -m lineclean .\samples\input\rough.png -o .\output\clean.png --mer
 uv run python -m lineclean .\samples\input\rough.png -o .\output\clean.png --merge-ids 3,7 --smooth --render
 ```
 
+## 파라미터 조정 (설정 파일)
+모든 파라미터는 프로젝트 루트의 [lineclean.toml](lineclean.toml)에 주석과 함께 정리되어 있다.
+현재 폴더에 이 파일이 있으면 자동으로 읽고, 실행할 때 `설정: ...` 줄에 어느 파일을 썼는지 출력한다.
+
+실험할 때는 파일을 복사해 값을 바꾸고 `--config`로 지정한다. 바꾸고 싶은 값만 적어도 된다.
+
+```powershell
+New-Item -ItemType Directory -Force configs
+Copy-Item lineclean.toml configs\try1.toml
+uv run python -m lineclean .\samples\input\rough.png -o .\output\try1.png --merge-ids 3,7 --smooth --render --config configs\try1.toml
+```
+
+잘못된 키나 범위 밖 값은 실행 전에 이유와 함께 거부한다. 설정을 바꾸면 덧그림 후보 번호가 달라질 수 있으니 `--merge`로 번호부터 다시 확인한다.
+
 처리 후에는 항상 위상 검사(처리 영역 밖의 교차·분기·끝점이 그대로인지)를 출력한다.
 `--topology-overlay`를 주면 획과 교차점(X 빨강, T/Y 주황, 끝점 초록)을 그린 `<출력>_topology.png`도 저장한다.
 

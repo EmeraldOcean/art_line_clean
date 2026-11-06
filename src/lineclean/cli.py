@@ -3,6 +3,7 @@
 기본은 항등(identity) 처리다. --merge를 주면 덧그은 선 병합(M2)을 켠다 (자동: 확실한 후보만).
 --merge-ids 3,7을 주면 오버레이에 번호로 표시된 후보 중 고른 것만 병합한다 (D-10).
 흐름: 입력 → 처리 → 출력 → 비교 시트(·병합 기록) → 무결성 검사.
+파라미터는 --config(기본: 현재 폴더의 lineclean.toml)에서 읽는다 (D-15).
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from lineclean.io import (
     load_rgba,
     save_rgba,
 )
+from lineclean.config import DEFAULT_CONFIG_NAME, Config, ConfigError, load_config
 from lineclean.junction import compare_topology, connectivity_changes, node_class, resolved_graph, topology
 from lineclean.merge import decisions_table, merge_overdraws
 from lineclean.render import render_clean
@@ -32,8 +34,6 @@ EXIT_OK = 0
 EXIT_INTEGRITY = 1  # 원본이 바뀌었거나 비생성 검사 실패
 EXIT_USAGE = 2  # 경로·입력 오류
 
-NONGENERATION_D = 2  # 고정 허용치 (DECISIONS D-7)
-TOPOLOGY_IGNORE_PX = 6  # 바뀐 픽셀에서 이 거리 안의 노드는 위상 검사에서 뺀다 (D-11)
 
 
 def default_sheet_path(output: Path) -> Path:
@@ -87,7 +87,9 @@ def topology_overlay_path(output: Path) -> Path:
 
 def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: bool = False,
         merge_ids: set[int] | None = None, topo_overlay: bool = False, smooth: bool = False,
-        render: bool = False) -> int:
+        render: bool = False, config: Config | None = None) -> int:
+    cfg = config or Config()
+    gp, jp, checks = cfg.graph, cfg.junction, cfg.checks
     if not input_path.is_file():
         print(f"입력 파일이 없습니다: {input_path}")
         return EXIT_USAGE
@@ -114,16 +116,16 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
             print(f"알림: {info.source_mode} 입력을 밝기→알파 규칙으로 변환했습니다{note}.")
 
         try:
-            merge_result = merge_overdraws(original, select=merge_ids) if merge else None
+            merge_result = merge_overdraws(original, cfg.merge, merge_ids, gp, jp, checks) if merge else None
         except ValueError as e:
             raise OutputPathError(str(e)) from None  # 아무것도 쓰기 전에 사용 오류로 끝낸다
         result = merge_result.rgba if merge_result else original.copy()
         smooth_input = result
-        smooth_result = smooth_lines(result) if smooth else None
+        smooth_result = smooth_lines(result, cfg.smooth, gp, jp) if smooth else None
         if smooth_result is not None:
             result = smooth_result.rgba
         render_input = result
-        render_result = render_clean(result) if render else None
+        render_result = render_clean(result, cfg.render, gp, jp, checks) if render else None
         if render_result is not None:
             result = render_result.rgba
 
@@ -134,13 +136,14 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
             _write_new(merge_log_path(output_path), _csv_bytes(decisions_table(merge_result)))
             _write_new(merge_overlay_path(output_path), _png_bytes(merge_overlay(original, merge_result)))
         if topo_overlay:
-            graph, _, strokes = resolved_graph(result)
+            graph, _, strokes = resolved_graph(result, gp, jp)
             _write_new(topology_overlay_path(output_path),
                        _png_bytes(topology_overlay(result, graph, strokes, node_class)))
     except (OutputPathError, UnsupportedImageError) as e:
         print(f"오류: {e}")
         return EXIT_USAGE
 
+    print(f"설정: {cfg.source}")
     print(f"출력: {output_path}")
     for path in extra:
         print(f"기록: {path}")
@@ -151,7 +154,7 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
             if merge_ids is not None and d.candidate in merge_ids and not d.merged:
                 print(f"  후보 {d.candidate}: 고른 후보지만 병합하지 않음 — {d.reason}")
     if smooth_result is not None:
-        jitter_after = jitter_index(resolved_graph(result)[2])
+        jitter_after = jitter_index(resolved_graph(smooth_result.rgba, gp, jp)[2], cfg.smooth)
         print(f"평활: 획 {smooth_result.strokes}개, 모서리 {smooth_result.corners}곳, "
               f"옮긴 픽셀 {smooth_result.moved_px}, 최대 이동 {smooth_result.max_shift_px:.2f}px, "
               f"떨림 지표 {smooth_result.jitter_before:.3f} → {jitter_after:.3f}px")
@@ -163,14 +166,14 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
     if file_sha256(input_path) != hash_before:
         print("실패: 입력 파일이 처리 중에 바뀌었습니다.")
         status = EXIT_INTEGRITY
-    violations = int(nongeneration_violations(original, result, NONGENERATION_D).sum())
-    print(f"비생성 검사 (d={NONGENERATION_D}px): 위반 {violations}픽셀")
+    violations = int(nongeneration_violations(original, result, checks.nongeneration_d).sum())
+    print(f"비생성 검사 (d={checks.nongeneration_d}px): 위반 {violations}픽셀")
     if violations:
         status = EXIT_INTEGRITY
 
     # 다시 그리기는 가장자리를 전부 바꾸므로 골격 위상(X/T/Y)이 아니라 잉크 연결로 확인한다 (D-14)
     if render_result is not None:
-        conn = connectivity_changes(render_input, result)
+        conn = connectivity_changes(render_input, result, gp.ink_threshold)
         if conn:
             print(f"다시 그리기 연결 검사: {len(conn)}곳 바뀜")
             for kind, (y, x) in conn[:10]:
@@ -180,9 +183,9 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
             print("다시 그리기 연결 검사: 변화 없음 (선이 새로 붙거나 끊기지 않음)")
 
     # 위상 검사: 처리로 바뀐 픽셀 근처(의도한 변화)를 빼고 X/T/Y·끝점이 그대로인지 본다 (D-11)
-    before = topology(original)
-    after = before if np.array_equal(original, result) else topology(result)
-    changed = dilate(np.any(original != result, axis=-1), TOPOLOGY_IGNORE_PX)
+    before = topology(original, gp, jp)
+    after = before if np.array_equal(original, result) else topology(result, gp, jp)
+    changed = dilate(np.any(original != result, axis=-1), checks.topology_ignore_px)
     problems = compare_topology(before, after, ignore=changed)
     counts = ", ".join(f"{k} {v}" for k, v in after.counts().items())
     if problems:
@@ -195,7 +198,7 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
 
     # 평활은 노드를 고정하므로 평활 전후 위상이 영역 제외 없이 완전히 같아야 한다 (D-12)
     if smooth_result is not None:
-        strict = compare_topology(topology(smooth_input), topology(smooth_result.rgba))
+        strict = compare_topology(topology(smooth_input, gp, jp), topology(smooth_result.rgba, gp, jp))
         if strict:
             print(f"평활 위상 검사: {len(strict)}곳 바뀜")
             for m in strict[:10]:
@@ -224,7 +227,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="깔끔한 선화로 다시 그리기 (M5): 획별 굵기·농도를 유지한 매끈한 선. 맨 마지막에 적용")
     parser.add_argument("--topology-overlay", action="store_true",
                         help="<출력>_topology.png 저장: 획별 색, X·T/Y·끝점 표시")
+    parser.add_argument("--config", type=Path,
+                        help=f"설정 파일 (기본: 현재 폴더의 {DEFAULT_CONFIG_NAME}, 없으면 코드 기본값)")
     args = parser.parse_args(argv)
+
+    try:
+        config = load_config(args.config)
+    except ConfigError as e:
+        print(f"설정 오류: {e}")
+        return EXIT_USAGE
 
     try:
         merge_ids = parse_ids(args.merge_ids) if args.merge_ids is not None else None
@@ -233,4 +244,4 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
     sheet_path = None if args.no_sheet else (args.sheet or default_sheet_path(args.output))
     return run(args.input, args.output, sheet_path, merge=args.merge, merge_ids=merge_ids,
-               topo_overlay=args.topology_overlay, smooth=args.smooth, render=args.render)
+               topo_overlay=args.topology_overlay, smooth=args.smooth, render=args.render, config=config)

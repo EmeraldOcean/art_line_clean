@@ -27,6 +27,7 @@ from skimage.feature import structure_tensor
 from skimage.morphology import disk, skeletonize
 
 from lineclean.compare import dilate
+from lineclean.config import CheckParams, GraphParams, JunctionParams
 from lineclean.graph import StrokeGraph, extract_graph, graph_from_skeleton, graph_stats, prune_spurs
 from lineclean.junction import resolve_crossings
 from lineclean.mask import ink_mask
@@ -36,8 +37,6 @@ from lineclean.strokes import Stroke, build_strokes
 
 @dataclass(frozen=True)
 class MergeParams:
-    ink_threshold: float = 16  # D-8
-    prune_factor: float = 2.0  # D-8
     orientation_sigma: float = 2.0  # 구조 텐서 적분 범위 (px)
     max_angle_deg: float = 20.0  # 나란함: 방향 차 상한
     max_center_dist_widths: float = 2.5  # 가까움: 중심 간 거리 상한 (선 굵기 배수)
@@ -47,7 +46,6 @@ class MergeParams:
     min_overlap_widths: float = 3.0  # 겹친 길이 하한 (선 굵기 배수)
     attach_fraction: float = 0.8  # 그룹에 붙일 짧은 획(가로대·꼬리)의 점 중 그룹 가까이 있는 비율 하한
     blend_widths: float = 3.0  # 이어지는 획으로 옮겨 붙이는 구간 길이 (선 굵기 배수)
-    nongeneration_d: int = 2  # D-7
     candidate_cover: float = 0.4  # 이 이상 겹친 쌍은 후보로 번호를 붙여 보여 준다 (사용자가 고를 수 있음)
 
 
@@ -266,7 +264,7 @@ def _groups(strokes: list[Stroke], s: _Samples, accepted: list[_Pair], p: MergeP
 # ---- 4. 대표 중간선 ----------------------------------------------------------
 
 def _representative(
-    region: np.ndarray, gap_px: float, width_px: float, alpha: np.ndarray, p: MergeParams
+    region: np.ndarray, gap_px: float, width_px: float, alpha: np.ndarray, prune_factor: float
 ) -> np.ndarray | None:
     """그룹 잉크 영역(잘라낸 bool 배열)의 틈을 메워 중간선 (N, 2) float (y, x)를 구한다.
 
@@ -276,7 +274,7 @@ def _representative(
     r = int(np.ceil(max(gap_px - width_px, 0.0) / 2)) + 1
     closed = ndimage.binary_closing(np.pad(region, r), structure=disk(r))[r:-r, r:-r] | region
     dist = ndimage.distance_transform_edt(closed)
-    g = prune_spurs(graph_from_skeleton(skeletonize(closed), dist, alpha), dist, alpha, p.prune_factor)
+    g = prune_spurs(graph_from_skeleton(skeletonize(closed), dist, alpha), dist, alpha, prune_factor)
     st = graph_stats(g)
     if (st["endpoints"], st["junctions"], st["edges"], st["loops"]) != (2, 0, 1, 0):
         return None
@@ -360,7 +358,12 @@ def _anchor_blend(path: np.ndarray, strokes: list[Stroke], partial: dict[int, tu
 
 
 def merge_overdraws(
-    rgba: np.ndarray, params: MergeParams | None = None, select: set[int] | None = None
+    rgba: np.ndarray,
+    params: MergeParams | None = None,
+    select: set[int] | None = None,
+    gp: GraphParams | None = None,
+    jp: JunctionParams | None = None,
+    checks: CheckParams | None = None,
 ) -> MergeResult:
     """덧그림을 찾아 중간선으로 병합한 새 RGBA와 판정 기록을 반환한다. 입력은 바꾸지 않는다.
 
@@ -368,13 +371,15 @@ def merge_overdraws(
     select를 주면 수동: 그 번호의 후보만 병합한다 (겹침 기준은 보지 않지만 안전 검사는 한다).
     """
     p = params or MergeParams()
+    gp = gp or GraphParams()
+    checks = checks or CheckParams()
     alpha = rgba[..., 3]
-    ink = ink_mask(rgba, threshold=p.ink_threshold)
+    ink = ink_mask(rgba, threshold=gp.ink_threshold)
     graph, dist = extract_graph(rgba, ink)
-    graph = prune_spurs(graph, dist, alpha, p.prune_factor)
+    graph = prune_spurs(graph, dist, alpha, gp.prune_factor)
     # 얕은 X 교차를 교차점 하나로 합쳐, 획이 교차를 곧게 지나도록 엮는다 (M3)
-    graph, crossings = resolve_crossings(graph)
-    strokes = build_strokes(graph, forced_pairs={c.node: c.pairs for c in crossings})
+    graph, crossings = resolve_crossings(graph, jp, gp.continuation_deg)
+    strokes = build_strokes(graph, gp.continuation_deg, forced_pairs={c.node: c.pairs for c in crossings})
 
     owner_edge, owner_node = _ownership(graph, ink)
     samples = _sample_strokes(strokes, _orientation(alpha, p.orientation_sigma))
@@ -397,7 +402,7 @@ def merge_overdraws(
         supported_by.setdefault(k, set()).add(j)
 
     out = rgba.astype(np.float64)
-    allowed = dilate(alpha > 0, p.nongeneration_d)
+    allowed = dilate(alpha > 0, checks.nongeneration_d)
     decisions: list[GroupDecision] = []
 
     for number, members in enumerate(groups, start=1):
@@ -462,7 +467,7 @@ def merge_overdraws(
         y0, y1 = max(ys.min() - margin, 0), min(ys.max() + margin + 1, rgba.shape[0])
         x0, x1 = max(xs.min() - margin, 0), min(xs.max() + margin + 1, rgba.shape[1])
 
-        path = _representative(region[y0:y1, x0:x1], dec.gap_px, width, alpha[y0:y1, x0:x1], p)
+        path = _representative(region[y0:y1, x0:x1], dec.gap_px, width, alpha[y0:y1, x0:x1], gp.prune_factor)
         if path is None:
             dec.reason = "대표선이 단일 경로가 아님"
             continue
@@ -483,7 +488,7 @@ def merge_overdraws(
         cov = stroke_coverage([(path[:, ::-1] + 0.5, stroke_width)], (0, 0, x1 - x0, y1 - y0)) / 255.0
         s = cov * ink_alpha / 255.0
         if ((s > 0) & ~allowed[y0:y1, x0:x1]).any():
-            dec.reason = f"비생성 위반 (원본 잉크 + {p.nongeneration_d}px 밖에 그려짐)"
+            dec.reason = f"비생성 위반 (원본 잉크 + {checks.nongeneration_d}px 밖에 그려짐)"
             continue
 
         _compose(out[y0:y1, x0:x1], region[y0:y1, x0:x1], s, color)

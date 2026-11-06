@@ -21,15 +21,13 @@ import numpy as np
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
+from lineclean.config import GraphParams, JunctionParams
 from lineclean.graph import ENDPOINT, JUNCTION, Edge, Node, StrokeGraph, extract_graph, prune_spurs
 from lineclean.mask import ink_mask
-from lineclean.strokes import MAX_CONTINUATION_DEG, Stroke, build_strokes
+from lineclean.strokes import Stroke, build_strokes
 
-# 두 선의 잉크가 붙어 하나로 보이는 구간의 길이는 대략 w / sin(θ/2)이다. 안티앨리어싱 번짐까지 감안해 2배.
-MAX_BRIDGE_WIDTHS = 10.0
-BRIDGE_ANGLE_FACTOR = 2.0
-DIRECTION_REACH_WIDTHS = 4.0  # 가지 방향을 잴 거리 (선 굵기 배수)
-MAX_LINE_OFFSET_WIDTHS = 1.0  # 다리 너머 짝 두 가지가 한 직선에서 벗어나도 되는 거리 (선 굵기 배수)
+# 파라미터(다리 길이 상한 등)는 config.JunctionParams (D-11). 두 선의 잉크가 붙어 하나로 보이는 구간의
+# 길이는 대략 w / sin(θ/2)이고, 안티앨리어싱 번짐까지 감안해 기본 계수를 2배로 둔다.
 
 
 @dataclass
@@ -65,7 +63,9 @@ def _straight(u: np.ndarray, v: np.ndarray) -> float:
     return float(-(u @ v))
 
 
-def _judge_bridge(graph: StrokeGraph, bridge: Edge) -> tuple[list[tuple[int, int]], float] | None:
+def _judge_bridge(
+    graph: StrokeGraph, bridge: Edge, jp: JunctionParams, continuation_deg: float
+) -> tuple[list[tuple[int, int]], float] | None:
     """다리가 X 교차의 일부면 (다리 너머 짝 [(n1쪽 엣지, n2쪽 엣지)], 교차각) 아니면 None."""
     if len(bridge.nodes) != 2 or bridge.nodes[0] == bridge.nodes[1]:
         return None
@@ -82,9 +82,9 @@ def _judge_bridge(graph: StrokeGraph, bridge: Edge) -> tuple[list[tuple[int, int
     if {e.id for e in outer[n1]} & {e.id for e in outer[n2]}:
         return None  # 두 분기점을 직접 잇는 다른 엣지가 있으면 X가 아니라 고리다
 
-    cos_min = np.cos(np.radians(MAX_CONTINUATION_DEG))
+    cos_min = np.cos(np.radians(continuation_deg))
     width = float(np.median(np.maximum(2 * bridge.radius - 1, 1.0)))
-    reach = DIRECTION_REACH_WIDTHS * width
+    reach = jp.direction_reach_widths * width
     d1 = [_outward(e, n1, reach) for e in outer[n1]]
     d2 = [_outward(e, n2, reach) for e in outer[n2]]
     p1 = [_reach_point(e, n1, reach) for e in outer[n1]]
@@ -104,7 +104,7 @@ def _judge_bridge(graph: StrokeGraph, bridge: Edge) -> tuple[list[tuple[int, int
     valid = []
     for opt in (((0, 0), (1, 1)), ((0, 1), (1, 0))):
         score = min(_straight(d1[a], d2[b]) for a, b in opt)
-        if score >= cos_min and all(offset(a, b) <= MAX_LINE_OFFSET_WIDTHS * width for a, b in opt):
+        if score >= cos_min and all(offset(a, b) <= jp.max_line_offset_widths * width for a, b in opt):
             valid.append((score, opt))
     if not valid:
         return None
@@ -112,21 +112,26 @@ def _judge_bridge(graph: StrokeGraph, bridge: Edge) -> tuple[list[tuple[int, int
     # 2. 다리 길이: 교차각 θ는 한 분기점에서 두 가지가 벌어진 각
     theta = float(np.degrees(np.arccos(np.clip(d1[0] @ d1[1], -1.0, 1.0))))
     theta = min(theta, 180.0 - theta)
-    limit = min(BRIDGE_ANGLE_FACTOR * width / max(np.sin(np.radians(theta / 2)), 1e-6), MAX_BRIDGE_WIDTHS * width)
+    limit = min(jp.bridge_angle_factor * width / max(np.sin(np.radians(theta / 2)), 1e-6),
+                jp.max_bridge_widths * width)
     if bridge.length > limit:
         return None
     return [(outer[n1][a].id, outer[n2][b].id) for a, b in best], theta
 
 
-def resolve_crossings(graph: StrokeGraph) -> tuple[StrokeGraph, list[Crossing]]:
+def resolve_crossings(
+    graph: StrokeGraph, jp: JunctionParams | None = None, continuation_deg: float | None = None
+) -> tuple[StrokeGraph, list[Crossing]]:
     """X 교차로 판정된 "분기점 두 개 + 다리"를 교차점 하나로 합친 새 그래프와 교차 목록.
 
     그래프가 덮는 픽셀은 바뀌지 않는다 (다리 픽셀은 교차점 노드의 픽셀이 된다).
     """
+    jp = jp or JunctionParams()
+    continuation_deg = GraphParams().continuation_deg if continuation_deg is None else continuation_deg
     used: set[int] = set()
     merges = []  # (다리, 짝, 교차각)
     for e in sorted(graph.edges, key=lambda e: e.length):
-        judged = _judge_bridge(graph, e)
+        judged = _judge_bridge(graph, e, jp, continuation_deg)
         if judged is None or set(e.nodes) & used:
             continue
         used |= set(e.nodes)
@@ -193,20 +198,25 @@ def _classify(graph: StrokeGraph, node: Node) -> str:
     return {3: TY, 4: X}.get(graph.degree[node.id], OTHER)
 
 
-def resolved_graph(rgba: np.ndarray) -> tuple[StrokeGraph, list[Crossing], list[Stroke]]:
+def resolved_graph(
+    rgba: np.ndarray, gp: GraphParams | None = None, jp: JunctionParams | None = None
+) -> tuple[StrokeGraph, list[Crossing], list[Stroke]]:
     """D-8 그래프 → 잔가지 가지치기 → 교차 정리 → 획 엮기."""
-    graph, dist = extract_graph(rgba, ink_mask(rgba))
-    graph, crossings = resolve_crossings(prune_spurs(graph, dist, rgba[..., 3]))
-    return graph, crossings, build_strokes(graph, forced_pairs={c.node: c.pairs for c in crossings})
+    gp = gp or GraphParams()
+    graph, dist = extract_graph(rgba, ink_mask(rgba, threshold=gp.ink_threshold))
+    graph = prune_spurs(graph, dist, rgba[..., 3], gp.prune_factor)
+    graph, crossings = resolve_crossings(graph, jp, gp.continuation_deg)
+    strokes = build_strokes(graph, gp.continuation_deg, forced_pairs={c.node: c.pairs for c in crossings})
+    return graph, crossings, strokes
 
 
 def node_class(graph: StrokeGraph, node: Node) -> str:
     return _classify(graph, node)
 
 
-def topology(rgba: np.ndarray) -> Topology:
+def topology(rgba: np.ndarray, gp: GraphParams | None = None, jp: JunctionParams | None = None) -> Topology:
     """교차 정리한 그래프의 노드를 분류한다. 고립된 점(엣지 없는 노드)은 뺀다."""
-    graph, _, _ = resolved_graph(rgba)
+    graph, _, _ = resolved_graph(rgba, gp, jp)
     radii = np.concatenate([e.radius for e in graph.edges]) if graph.edges else np.array([1.0])
     nodes = [TopoNode(_classify(graph, n), n.yx) for n in graph.nodes if graph.degree[n.id] > 0]
     return Topology(nodes, float(np.median(np.maximum(2 * radii - 1, 1.0))))

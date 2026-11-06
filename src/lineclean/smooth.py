@@ -21,6 +21,7 @@ import numpy as np
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
+from lineclean.config import GraphParams, JunctionParams
 from lineclean.junction import resolved_graph, topology, topology_changes
 from lineclean.strokes import Stroke
 
@@ -229,14 +230,19 @@ def _warp(rgba: np.ndarray, strokes: list[Stroke], shifts: list[np.ndarray],
     return result, float(np.hypot(dy, dx).max())
 
 
-def smooth_lines(rgba: np.ndarray, params: SmoothParams | None = None) -> SmoothResult:
+def smooth_lines(
+    rgba: np.ndarray,
+    params: SmoothParams | None = None,
+    gp: GraphParams | None = None,
+    jp: JunctionParams | None = None,
+) -> SmoothResult:
     """떨림을 완화한 새 RGBA를 반환한다. 입력은 바꾸지 않는다.
 
     옮긴 뒤 위상(X/T/Y·끝점)을 다시 재서, 바뀐 곳 근처 획의 변위는 0으로 되돌리고 다시 옮긴다.
     (예: 굵은 가닥 안의 얇은 틈이 보간으로 벌어져 고리가 새로 생기는 경우)
     """
     p = params or SmoothParams()
-    graph, _, strokes = resolved_graph(rgba)
+    graph, _, strokes = resolved_graph(rgba, gp, jp)
     node_pixels = {(int(y), int(x)) for n in graph.nodes for y, x in n.pixels}
 
     shifts, corners = [], 0
@@ -247,11 +253,11 @@ def smooth_lines(rgba: np.ndarray, params: SmoothParams | None = None) -> Smooth
     jitter_before = jitter_index(strokes, p)
 
     result, max_shift = _warp(rgba, strokes, shifts, node_pixels)
-    before = topology(rgba)
+    before = topology(rgba, gp, jp)
     for _ in range(MAX_REVERT_ROUNDS):
         if np.array_equal(result, rgba):
             break
-        changed = topology_changes(before, topology(result))
+        changed = topology_changes(before, topology(result, gp, jp))
         if not changed:
             break
         spots = np.array([yx for _, _, yx in changed])

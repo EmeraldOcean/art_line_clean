@@ -13,7 +13,7 @@ import numpy as np
 from lineclean.graph import StrokeGraph
 
 END_DIRECTION_PX = 5  # 엣지 끝 방향을 잴 구간
-MAX_CONTINUATION_DEG = 35.0  # 이보다 많이 꺾이면 같은 획으로 잇지 않는다
+MAX_CONTINUATION_DEG = 35.0  # 기본값. 설정은 config.GraphParams.continuation_deg
 
 
 @dataclass

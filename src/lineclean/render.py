@@ -15,6 +15,7 @@ from scipy import ndimage
 from scipy.spatial import cKDTree
 
 from lineclean.compare import dilate
+from lineclean.config import CheckParams, GraphParams, JunctionParams
 
 SUPERSAMPLE = 4
 STAMP_STEP = 0.25  # 브러시를 찍는 간격 (출력 px)
@@ -63,8 +64,6 @@ class RenderParams:
     profile_sigma_widths: float = 2.0  # 굵기·농도를 획을 따라 부드럽게 하는 σ (선 굵기 배수)
     max_width_ratio: float = 1.5  # 굵기 상한: 획의 보통(중앙값) 굵기의 배수
     fringe_px: float = 0.5  # 마스크로 잰 굵기에서 빼는 번짐 폭
-    ink_threshold: float = 16  # D-8: 이보다 옅은 픽셀은 어느 획에도 속하지 않음
-    nongeneration_d: int = 2  # D-7
     revert_radius_px: float = 10.0  # 위상이 바뀐 곳에서 이 거리 안을 지나는 획은 원본 유지
 
 
@@ -134,7 +133,13 @@ def _darkness(center: np.ndarray, width: np.ndarray, alpha: np.ndarray, cov: np.
     return np.clip(dark, 0.0, 255.0)
 
 
-def render_clean(rgba: np.ndarray, params: RenderParams | None = None) -> RenderResult:
+def render_clean(
+    rgba: np.ndarray,
+    params: RenderParams | None = None,
+    gp: GraphParams | None = None,
+    jp: JunctionParams | None = None,
+    checks: CheckParams | None = None,
+) -> RenderResult:
     """획마다 굵기·농도를 재서 매끈한 가장자리로 다시 그린 새 RGBA. 입력은 바꾸지 않는다.
 
     다시 그린 뒤 잉크 덩어리의 연결을 비교해, 서로 다른 선이 붙거나(이어짐) 선이 끊긴 곳 근처를
@@ -144,11 +149,13 @@ def render_clean(rgba: np.ndarray, params: RenderParams | None = None) -> Render
     from lineclean.junction import connectivity_changes, resolved_graph
 
     p = params or RenderParams()
-    _, _, strokes = resolved_graph(rgba)
+    gp = gp or GraphParams()
+    checks = checks or CheckParams()
+    _, _, strokes = resolved_graph(rgba, gp, jp)
     keep_original: set[int] = set()
-    result, clipped, specks = _render(rgba, strokes, keep_original, p)
+    result, clipped, specks = _render(rgba, strokes, keep_original, p, gp, checks)
     for _ in range(MAX_REVERT_ROUNDS):
-        changed = connectivity_changes(rgba, result, p.ink_threshold)
+        changed = connectivity_changes(rgba, result, gp.ink_threshold)
         if not changed:
             break
         spots = np.array([yx for _, yx in changed])
@@ -157,14 +164,16 @@ def render_clean(rgba: np.ndarray, params: RenderParams | None = None) -> Render
         if not hit:
             break
         keep_original |= hit
-        result, clipped, specks = _render(rgba, strokes, keep_original, p)
+        result, clipped, specks = _render(rgba, strokes, keep_original, p, gp, checks)
 
     alpha = rgba[..., 3].astype(np.float64)
     mass = float(result[..., 3].astype(np.float64).sum()) / max(float(alpha.sum()), 1.0)
     return RenderResult(result, len(strokes), mass, clipped, specks, len(keep_original))
 
 
-def _render(rgba: np.ndarray, strokes, keep_original: set[int], p: RenderParams) -> tuple[np.ndarray, int, int]:
+def _render(
+    rgba: np.ndarray, strokes, keep_original: set[int], p: RenderParams, gp: GraphParams, checks: CheckParams
+) -> tuple[np.ndarray, int, int]:
     """(다시 그린 RGBA, 비생성으로 잘라 낸 픽셀 수, 원본 그대로 둔 잉크 덩어리 수)."""
     alpha = rgba[..., 3]
     h, w = alpha.shape
@@ -205,7 +214,7 @@ def _render(rgba: np.ndarray, strokes, keep_original: set[int], p: RenderParams)
         out_rgb[gy[better], gx[better]] = np.median(rgba[s.path[:, 0], s.path[:, 1], :3], axis=0)
 
     # 획이 하나도 지나지 않는 잉크 덩어리(작은 점 등)는 원본 그대로 둔다 (원칙 3)
-    labels, n = ndimage.label(alpha >= p.ink_threshold, structure=np.ones((3, 3)))
+    labels, n = ndimage.label(alpha >= gp.ink_threshold, structure=np.ones((3, 3)))
     has_stroke = np.zeros(n + 1, dtype=bool)
     has_stroke[np.unique(labels[covered])] = True
     speck = (labels > 0) & ~has_stroke[labels]
@@ -221,7 +230,7 @@ def _render(rgba: np.ndarray, strokes, keep_original: set[int], p: RenderParams)
         out_rgb[take] = rgba[take, :3]
 
     # 비생성 강제: 원본 잉크를 d만큼 팽창한 영역 밖은 잘라 낸다
-    allowed = dilate(alpha > 0, p.nongeneration_d)
+    allowed = dilate(alpha > 0, checks.nongeneration_d)
     clipped = int(((out_a > 0) & ~allowed).sum())
     out_a[~allowed] = 0.0
 

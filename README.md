@@ -43,14 +43,19 @@ uv run python -m lineclean .\samples\input\rough.png -o .\output\clean.png --mer
 ```
 
 ## 파라미터 조정 (설정 파일)
-모든 파라미터는 프로젝트 루트의 [lineclean.toml](lineclean.toml)에 주석과 함께 정리되어 있다.
-현재 폴더에 이 파일이 있으면 자동으로 읽고, 실행할 때 `설정: ...` 줄에 어느 파일을 썼는지 출력한다.
+모든 파라미터는 템플릿 [lineclean.default.toml](lineclean.default.toml)에 기본값·주석과 함께 정리되어 있다.
+템플릿은 직접 고치지 말고 `lineclean.toml`로 복사해 쓴다. `lineclean.toml`은 내 설정 파일이라 git에 올라가지 않는다.
 
-실험할 때는 파일을 복사해 값을 바꾸고 `--config`로 지정한다. 바꾸고 싶은 값만 적어도 된다.
+```powershell
+Copy-Item lineclean.default.toml lineclean.toml
+```
+
+현재 폴더에 `lineclean.toml`이 있으면 자동으로 읽고(없으면 코드 기본값), 실행할 때 `설정: ...` 줄에 어느 파일을 썼는지 출력한다.
+여러 설정을 비교할 때는 복사본을 더 만들어 `--config`로 지정한다. 바꾸고 싶은 값만 적어도 된다.
 
 ```powershell
 New-Item -ItemType Directory -Force configs
-Copy-Item lineclean.toml configs\try1.toml
+Copy-Item lineclean.default.toml configs\try1.toml
 uv run python -m lineclean .\samples\input\rough.png -o .\output\try1.png --merge-ids 3,7 --smooth --render --config configs\try1.toml
 ```
 

@@ -118,3 +118,13 @@ def test_render_input_unchanged_and_deterministic(cases):
     a, b = render_clean(rgba), render_clean(rgba)
     assert np.array_equal(rgba, before)
     assert np.array_equal(a.rgba, b.rgba)
+
+
+@pytest.mark.parametrize("name", ["y_then_cross", "cross_30", "junction_t", "branch_y", "two_t_close"])
+def test_faint_junctions_do_not_turn_into_dark_dots(cases, name):
+    # 분기점의 짧은 조각이 이웃 획의 잉크까지 세어 새까만 점이 되던 문제의 회귀 테스트:
+    # 옅은 선(알파 ≤ 120)으로 그린 분기·교차를 다시 그려도 원본에서 가장 진한 값보다 진해지면 안 된다
+    faint = cases[name].copy()
+    faint[..., 3] = (faint[..., 3].astype(np.uint16) * 120 // 255).astype(np.uint8)
+    r = render_clean(faint)
+    assert int(r.rgba[..., 3].max()) <= int(faint[..., 3].max()) + 2

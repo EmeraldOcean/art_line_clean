@@ -9,7 +9,7 @@ from lineclean.config import Config, ConfigError, config_from_dict, load_config
 from lineclean.io import PROJECT_ROOT, load_rgba, save_rgba
 from lineclean.synthetic import generate_all
 
-SHIPPED = PROJECT_ROOT / "lineclean.toml"
+SHIPPED = PROJECT_ROOT / "lineclean.default.toml"  # 템플릿 (내 설정 lineclean.toml은 git 밖)
 
 
 def test_shipped_file_matches_code_defaults():

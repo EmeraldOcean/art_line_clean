@@ -17,3 +17,6 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# 내 설정 파일 (템플릿은 lineclean.default.toml)
+lineclean.toml

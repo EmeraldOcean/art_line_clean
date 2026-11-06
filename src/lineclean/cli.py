@@ -228,7 +228,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--topology-overlay", action="store_true",
                         help="<출력>_topology.png 저장: 획별 색, X·T/Y·끝점 표시")
     parser.add_argument("--config", type=Path,
-                        help=f"설정 파일 (기본: 현재 폴더의 {DEFAULT_CONFIG_NAME}, 없으면 코드 기본값)")
+                        help=f"설정 파일 (기본: 현재 폴더의 {DEFAULT_CONFIG_NAME}, 없으면 코드 기본값). "
+                             "템플릿은 lineclean.default.toml")
     args = parser.parse_args(argv)
 
     try:

@@ -114,23 +114,34 @@ def _measure_geometry(
 
 
 def _darkness(center: np.ndarray, width: np.ndarray, alpha: np.ndarray, cov: np.ndarray,
-              box: tuple[int, int, int, int], sigma: float, step: float, fallback: float) -> np.ndarray:
+              box: tuple[int, int, int, int], sigma: float, step: float, fallback: float,
+              mine: np.ndarray) -> np.ndarray:
     """점마다 농도: 그 점 주변 띠(굵기/2 + 1.5px)에서 원본 알파 합 ÷ 다시 그린 덮임 합.
 
     잉크 총량을 띠 단위로 맞춘다. 단순 평균을 쓰면 가는 선은 덮임이 퍼지는 만큼 옅어진다.
+    mine(잘라낸 bool)은 이 획이 가장 가까운 획인 픽셀이다. 이웃 획의 잉크까지 세면, 분기점의 짧은 조각처럼
+    덮임은 작은데 주변 잉크는 많은 획이 새까만 점이 된다. 그래서 자기 몫의 픽셀만 세고,
+    결과도 그 위치 근처 자기 원본 픽셀의 가장 진한 값을 넘지 않게 자른다.
     """
     x0, y0, x1, y1 = box
-    ys, xs = np.nonzero((alpha[y0:y1, x0:x1] > 0) | (cov > 0))
+    ys, xs = np.nonzero(((alpha[y0:y1, x0:x1] > 0) | (cov > 0)) & mine)
     total_a = np.zeros(len(center))
     total_c = np.zeros(len(center))
+    peak = np.zeros(len(center))  # 점마다 자기 몫 원본 픽셀의 가장 진한 값
     if len(ys):
         d, idx = cKDTree(center).query(np.stack([ys + y0, xs + x0], axis=1))
         band = d <= width[idx] / 2 + 1.5
         np.add.at(total_a, idx[band], alpha[ys[band] + y0, xs[band] + x0])
         np.add.at(total_c, idx[band], cov[ys[band], xs[band]])
+        np.maximum.at(peak, idx[band], alpha[ys[band] + y0, xs[band] + x0])
     total_a, total_c = _profile(total_a, sigma, step), _profile(total_c, sigma, step)
     dark = np.where(total_c > 1e-6, total_a / np.maximum(total_c, 1e-6), fallback)
-    return np.clip(dark, 0.0, 255.0)
+    # 상한: 그 위치 근처(앞뒤 굵기만큼) 원본의 가장 진한 값. 농도를 획을 따라 부드럽게 하면서
+    # 옅게 사라지는 획 끝이나 분기점의 짧은 조각이 이웃보다 진해지는 것을 막는다
+    reach = max(int(round(float(np.median(width)) / max(step, 1e-6))), 1)
+    cap = ndimage.maximum_filter1d(peak, size=2 * reach + 1, mode="nearest")
+    cap = np.where(cap > 0, cap, fallback)
+    return np.clip(dark, 0.0, cap)
 
 
 def render_clean(
@@ -183,6 +194,15 @@ def _render(
     original_zone = np.zeros((h, w), dtype=bool)  # 다시 그리지 않고 원본을 둘 영역
     radii = np.concatenate([s.radius for s in strokes]) if strokes else np.ones(1)
     global_width = float(np.median(np.maximum(2 * radii - 1, 1.0)))
+    # 픽셀마다 가장 가까운 획 (농도를 잴 때 이웃 획의 잉크를 세지 않으려고)
+    owner_seed = np.zeros((h, w), dtype=np.int64)
+    for s in strokes:
+        owner_seed[s.path[:, 0], s.path[:, 1]] = s.id + 1
+    if owner_seed.any():
+        _, (oy, ox) = ndimage.distance_transform_edt(owner_seed == 0, return_indices=True)
+        owner = owner_seed[oy, ox] - 1
+    else:
+        owner = np.full((h, w), -1, dtype=np.int64)
     for s in strokes:
         covered[s.path[:, 0], s.path[:, 1]] = True
         if s.id in keep_original:
@@ -202,7 +222,8 @@ def _render(
         x0, x1 = max(int(center[:, 1].min()) - r, 0), min(int(center[:, 1].max()) + r + 1, w)
         # 픽셀 인덱스 i의 중심은 붓 좌표로 i + 0.5다
         cov = stroke_coverage([(center[:, ::-1] + 0.5, width_fn)], (x0, y0, x1, y1)) / 255.0
-        darkness = _darkness(center, width, alpha, cov, (x0, y0, x1, y1), sigma, step, float(np.median(s.alpha)))
+        darkness = _darkness(center, width, alpha, cov, (x0, y0, x1, y1), sigma, step,
+                             float(np.median(s.alpha)), owner[y0:y1, x0:x1] == s.id)
         ys, xs = np.nonzero(cov > 0)
         if not len(ys):
             continue

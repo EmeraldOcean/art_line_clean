@@ -27,7 +27,7 @@ from lineclean.io import (
 from lineclean.config import DEFAULT_CONFIG_NAME, Config, ConfigError, load_config
 from lineclean.junction import compare_topology, connectivity_changes, node_class, resolved_graph, topology
 from lineclean.merge import decisions_table, merge_overdraws
-from lineclean.render import render_clean
+from lineclean.render import render_clean, speck_px
 from lineclean.smooth import jitter_index, smooth_lines
 
 EXIT_OK = 0
@@ -176,7 +176,7 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
 
     # 다시 그리기는 가장자리를 전부 바꾸므로 골격 위상(X/T/Y)이 아니라 잉크 연결로 확인한다 (D-14)
     if render_result is not None:
-        conn = connectivity_changes(render_input, result, gp.ink_threshold)
+        conn = connectivity_changes(render_input, result, gp, speck_px(render_result.width_before_px))
         if conn:
             print(f"다시 그리기 연결 검사: {len(conn)}곳 바뀜")
             for kind, (y, x) in conn[:10]:

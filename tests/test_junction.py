@@ -3,7 +3,7 @@ import pytest
 
 from lineclean.graph import extract_graph, graph_stats, prune_spurs
 from lineclean.junction import X, TY, compare_topology, resolve_crossings, topology
-from lineclean.mask import ink_mask
+from lineclean.mask import ink
 from lineclean.strokes import build_strokes
 from lineclean.synthetic import generate_all
 
@@ -14,7 +14,7 @@ def cases():
 
 
 def _resolved(rgba):
-    g, dist = extract_graph(rgba, ink_mask(rgba))
+    g, dist = extract_graph(rgba, ink(rgba))
     g = prune_spurs(g, dist, rgba[..., 3])
     r, crossings = resolve_crossings(g)
     return g, r, crossings

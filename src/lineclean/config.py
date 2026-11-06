@@ -29,7 +29,9 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class GraphParams:
-    ink_threshold: float = 16  # D-8: 이 알파 이상을 잉크로 본다
+    ink_threshold: float = 16  # D-8: 이 알파 이상을 잉크로 본다 (최소 기준)
+    ink_relative: float = 0.3  # D-19: 주변 가장 진한 값의 이 비율 이상이어야 잉크 (0이면 끔)
+    ink_relative_window_px: int = 7  # D-19: "주변"의 크기 (px, 홀수 권장)
     prune_factor: float = 2.0  # D-8: 잔가지 가지치기 (길이 < factor × 반지름)
     continuation_deg: float = 35.0  # 분기점에서 이보다 많이 꺾이면 같은 획으로 잇지 않음
 
@@ -80,6 +82,8 @@ class Config:
 # 값의 허용 범위: (최솟값, 최댓값). None은 제한 없음. 명시하지 않은 키는 0보다 커야 한다.
 RANGES: dict[tuple[str, str], tuple[float | None, float | None]] = {
     ("graph", "ink_threshold"): (1, 255),
+    ("graph", "ink_relative"): (0, 0.9),
+    ("graph", "ink_relative_window_px"): (3, 51),
     ("graph", "continuation_deg"): (1, 90),
     ("merge", "max_angle_deg"): (1, 90),
     ("merge", "min_cover"): (0.01, 1.0),

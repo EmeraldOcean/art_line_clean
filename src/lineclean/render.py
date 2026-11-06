@@ -16,6 +16,7 @@ from scipy.spatial import cKDTree
 
 from lineclean.compare import dilate
 from lineclean.config import CheckParams, GraphParams, JunctionParams
+from lineclean.mask import ink
 
 SUPERSAMPLE = 4
 STAMP_STEP = 0.25  # 브러시를 찍는 간격 (출력 px)
@@ -70,6 +71,12 @@ class RenderParams:
 
 MAX_REVERT_ROUNDS = 3
 MIN_DRAWN_WIDTH_PX = 0.5  # 아무리 가늘게 해도 이보다 가늘게는 그리지 않음
+SPECK_WIDTHS_SQ = 2.0  # 연결 검사에서 "선"으로 보는 잉크 덩어리 최소 크기 = 이 값 × 선 굵기² (px)
+
+
+def speck_px(width_px: float) -> int:
+    """연결 검사에서 무시할 작은 잉크 조각의 크기 상한. 이보다 작은 조각이 떨어져 나가는 것은 선이 끊긴 게 아니다."""
+    return max(4, int(SPECK_WIDTHS_SQ * width_px ** 2))
 
 
 @dataclass
@@ -171,8 +178,9 @@ def render_clean(
     _, _, strokes = resolved_graph(rgba, gp, jp)
     keep_original: set[int] = set()
     result, clipped, specks, width_before, scale = _render(rgba, strokes, keep_original, p, gp, checks)
+    min_piece = speck_px(width_before)
     for _ in range(MAX_REVERT_ROUNDS):
-        changed = connectivity_changes(rgba, result, gp.ink_threshold)
+        changed = connectivity_changes(rgba, result, gp, min_piece)
         if not changed:
             break
         spots = np.array([yx for _, yx in changed])
@@ -252,7 +260,7 @@ def _render(
         out_rgb[gy[better], gx[better]] = np.median(rgba[s.path[:, 0], s.path[:, 1], :3], axis=0)
 
     # 획이 하나도 지나지 않는 잉크 덩어리(작은 점 등)는 원본 그대로 둔다 (원칙 3)
-    labels, n = ndimage.label(alpha >= gp.ink_threshold, structure=np.ones((3, 3)))
+    labels, n = ndimage.label(ink(rgba, gp), structure=np.ones((3, 3)))
     has_stroke = np.zeros(n + 1, dtype=bool)
     has_stroke[np.unique(labels[covered])] = True
     speck = (labels > 0) & ~has_stroke[labels]

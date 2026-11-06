@@ -23,7 +23,7 @@ from scipy.spatial import cKDTree
 
 from lineclean.config import GraphParams, JunctionParams
 from lineclean.graph import ENDPOINT, JUNCTION, Edge, Node, StrokeGraph, extract_graph, prune_spurs
-from lineclean.mask import ink_mask
+from lineclean.mask import ink
 from lineclean.strokes import Stroke, build_strokes
 
 # 파라미터(다리 길이 상한 등)는 config.JunctionParams (D-11). 두 선의 잉크가 붙어 하나로 보이는 구간의
@@ -58,6 +58,20 @@ def _reach_point(edge: Edge, node: int, reach: float) -> np.ndarray:
     return path[min(k, len(path) - 1)].astype(float)
 
 
+def _far_direction(edge: Edge, node: int, reach: float) -> np.ndarray:
+    """분기점에서 reach만큼 들어간 점 → 2·reach 점의 방향 (분기점 근처 휨을 피한 가지 방향).
+
+    엣지가 짧으면 엣지 끝까지. 교차점 바로 옆 스켈레톤은 두 선 사이로 휘어 있어서, 거기서 잰 방향으로
+    "한 직선 위인가"를 보면 각도 오차가 멀리 갈수록 벌어져 진짜 교차를 놓친다.
+    """
+    path = edge.path if edge.nodes[0] == node else edge.path[::-1]
+    k1 = int(min(max(reach, 5), (len(path) - 1) / 2)) or 1
+    k2 = min(2 * k1, len(path) - 1)
+    v = (path[k2] - path[min(k1, len(path) - 1)]).astype(float)
+    n = np.hypot(*v)
+    return v / n if n > 0 else _outward(edge, node, reach)
+
+
 def _straight(u: np.ndarray, v: np.ndarray) -> float:
     """두 바깥 방향 u, v가 한 선으로 곧게 이어지는 정도 (1 = 정반대 방향 = 일직선)."""
     return float(-(u @ v))
@@ -89,6 +103,8 @@ def _judge_bridge(
     d2 = [_outward(e, n2, reach) for e in outer[n2]]
     p1 = [_reach_point(e, n1, reach) for e in outer[n1]]
     p2 = [_reach_point(e, n2, reach) for e in outer[n2]]
+    f1 = [_far_direction(e, n1, reach) for e in outer[n1]]
+    f2 = [_far_direction(e, n2, reach) for e in outer[n2]]
     # 4. 같은 분기점의 두 가지는 한 가닥이 아니어야 한다
     if _straight(d1[0], d1[1]) >= cos_min or _straight(d2[0], d2[1]) >= cos_min:
         return None
@@ -96,7 +112,7 @@ def _judge_bridge(
     # 얕은 교차에서는 두 선이 거의 나란해서 "나란하지만 어긋난" 짝이 방향만으로는 더 곧아 보이므로,
     # 한 직선 위에 있는지(벗어남 ≤ 1w)를 먼저 걸러야 올바른 짝이 남는다. 어긋난 T 두 개도 여기서 걸러진다.
     def offset(a: int, b: int) -> float:
-        u = d1[a] - d2[b]
+        u = f1[a] - f2[b]
         u /= max(np.hypot(*u), 1e-9)
         v = p2[b] - p1[a]
         return abs(float(u[0] * v[1] - u[1] * v[0]))  # u에 수직인 거리
@@ -203,7 +219,7 @@ def resolved_graph(
 ) -> tuple[StrokeGraph, list[Crossing], list[Stroke]]:
     """D-8 그래프 → 잔가지 가지치기 → 교차 정리 → 획 엮기."""
     gp = gp or GraphParams()
-    graph, dist = extract_graph(rgba, ink_mask(rgba, threshold=gp.ink_threshold))
+    graph, dist = extract_graph(rgba, ink(rgba, gp))
     graph = prune_spurs(graph, dist, rgba[..., 3], gp.prune_factor)
     graph, crossings = resolve_crossings(graph, jp, gp.continuation_deg)
     strokes = build_strokes(graph, gp.continuation_deg, forced_pairs={c.node: c.pairs for c in crossings})
@@ -260,16 +276,16 @@ def _closest_pair_midpoint(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
 
 
 def connectivity_changes(
-    before: np.ndarray, after: np.ndarray, threshold: float = 16, min_px: int = 4
+    before: np.ndarray, after: np.ndarray, gp: GraphParams | None = None, min_px: int = 4
 ) -> list[tuple[str, tuple[float, float]]]:
-    """잉크(α ≥ threshold) 덩어리의 연결이 바뀐 곳: ("이어짐" | "끊김" | "사라짐" | "새로 생김", 위치).
+    """잉크(설정의 잉크 판정 규칙) 덩어리의 연결이 바뀐 곳: ("이어짐" | "끊김" | "사라짐" | "새로 생김", 위치).
 
     골격 위상(X/T/Y)과 달리 가장자리 모양에 덜 민감하다. 다시 그리기처럼 가장자리만 바뀌는 처리에서
     서로 다른 선이 붙거나(이어짐) 한 선이 끊기는지(끊김) 확인하는 데 쓴다. min_px 미만 덩어리는 보지 않는다.
     """
     eight = np.ones((3, 3), dtype=bool)
-    lb, nb = ndimage.label(before[..., 3] >= threshold, structure=eight)
-    la, na = ndimage.label(after[..., 3] >= threshold, structure=eight)
+    lb, nb = ndimage.label(ink(before, gp), structure=eight)
+    la, na = ndimage.label(ink(after, gp), structure=eight)
     size_b = np.bincount(lb.ravel(), minlength=nb + 1)
     size_a = np.bincount(la.ravel(), minlength=na + 1)
     changes: list[tuple[str, tuple[float, float]]] = []

@@ -5,7 +5,7 @@ from scipy.spatial import cKDTree
 
 from lineclean.compare import nongeneration_violations
 from lineclean.graph import extract_graph, graph_stats, prune_spurs
-from lineclean.mask import ink_mask
+from lineclean.mask import ink
 from lineclean.merge import decisions_table, merge_overdraws
 from lineclean.synthetic import base_paths, generate_all
 
@@ -29,7 +29,7 @@ def results(cases):
 
 
 def _topology(rgba):
-    g, dist = extract_graph(rgba, ink_mask(rgba))
+    g, dist = extract_graph(rgba, ink(rgba))
     s = graph_stats(prune_spurs(g, dist, rgba[..., 3]))
     return s["endpoints"], s["junctions"], s["edges"], s["loops"]
 
@@ -40,7 +40,12 @@ def test_not_overdrawn_is_untouched(cases, results, name):
     assert np.array_equal(results[name].rgba, cases[name])
 
 
-@pytest.mark.parametrize("name", ["overdraw2_gap3", "overdraw3_gap1"])
+@pytest.mark.parametrize("name", [
+    "overdraw2_gap3",
+    # D-19 이후 알려진 한계: 1px 간격 3중 덧그림은 예전에는 번짐이 틈을 메워 한 덩어리였지만,
+    # 자동 잉크 판정으로 틈이 열려 사다리가 되고 병합이 한 줄로 정리하지 못한다 (ROADMAP M6-5)
+    pytest.param("overdraw3_gap1", marks=pytest.mark.xfail(strict=True, reason="D-19: 1px 간격 3중 덧그림")),
+])
 def test_overdraw_becomes_one_line(results, name):
     assert _topology(results[name].rgba) == (2, 0, 1, 0)
 

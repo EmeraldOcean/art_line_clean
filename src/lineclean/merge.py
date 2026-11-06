@@ -30,9 +30,13 @@ from lineclean.compare import dilate
 from lineclean.config import CheckParams, GraphParams, JunctionParams
 from lineclean.graph import StrokeGraph, extract_graph, graph_from_skeleton, graph_stats, prune_spurs
 from lineclean.junction import resolve_crossings
-from lineclean.mask import ink_mask
+from lineclean.mask import ink as ink_of
 from lineclean.render import stroke_coverage
 from lineclean.strokes import Stroke, build_strokes
+
+
+LEFTOVER_SPECK_MIN_PX = 6  # 병합 뒤 지운 가닥 끝에 남은 조각으로 보고 지울 크기 상한 (최소)
+LEFTOVER_SPECK_WIDTHS = 2.0  # 같은 상한 = 이 값 × 선 굵기² (px)
 
 
 @dataclass(frozen=True)
@@ -330,6 +334,32 @@ def _compose(crop: np.ndarray, erase: np.ndarray, s: np.ndarray, color: np.ndarr
     crop[..., 3] = a_o * 255.0
 
 
+def _drop_leftover_specks(out: np.ndarray, region: np.ndarray, box: tuple[int, int, int, int],
+                          gp: GraphParams, width_px: float) -> None:
+    """지운 가닥 끝에 남은 작은 잉크 조각을 없앤다.
+
+    가닥을 지운 뒤 끝의 픽셀 몇 개(지우는 범위 바로 밖에 남은 가닥 머리, 옅은 번짐)가 홀로 남으면
+    끝점이 늘어난다. 지운 영역에 닿아 있고 LEFTOVER_SPECK_WIDTHS × 굵기² 이하인 조각만 지운다
+    (원래 있던 작은 점은 지운 영역에 닿지 않으므로 그대로).
+    """
+    max_px = max(LEFTOVER_SPECK_MIN_PX, int(LEFTOVER_SPECK_WIDTHS * width_px ** 2))
+    y0, y1, x0, x1 = box
+    crop = out[y0:y1, x0:x1]
+    alpha = np.clip(np.rint(crop[..., 3]), 0, 255).astype(np.uint8)
+    probe = np.zeros(crop.shape[:2] + (4,), dtype=np.uint8)
+    probe[..., 3] = alpha
+    labels, n = ndimage.label(ink_of(probe, gp), structure=np.ones((3, 3)))
+    if n == 0:
+        return
+    sizes = np.bincount(labels.ravel(), minlength=n + 1)
+    near_erased = ndimage.binary_dilation(region[y0:y1, x0:x1], iterations=2)
+    for lab in range(1, n + 1):
+        piece = labels == lab
+        if sizes[lab] <= max_px and (piece & near_erased).any():
+            grow = ndimage.binary_dilation(piece, iterations=1)
+            crop[grow, 3] = 0.0  # 조각과 그 바로 옆 번짐까지
+
+
 # ---- 5. 병합 ----------------------------------------------------------------
 
 def _anchor_blend(path: np.ndarray, strokes: list[Stroke], partial: dict[int, tuple[int, int]],
@@ -374,14 +404,16 @@ def merge_overdraws(
     gp = gp or GraphParams()
     checks = checks or CheckParams()
     alpha = rgba[..., 3]
-    ink = ink_mask(rgba, threshold=gp.ink_threshold)
+    ink = ink_of(rgba, gp)
     graph, dist = extract_graph(rgba, ink)
     graph = prune_spurs(graph, dist, alpha, gp.prune_factor)
     # 얕은 X 교차를 교차점 하나로 합쳐, 획이 교차를 곧게 지나도록 엮는다 (M3)
     graph, crossings = resolve_crossings(graph, jp, gp.continuation_deg)
     strokes = build_strokes(graph, gp.continuation_deg, forced_pairs={c.node: c.pairs for c in crossings})
 
-    owner_edge, owner_node = _ownership(graph, ink)
+    # 소유권은 잉크로 판정되지 않은 옅은 번짐(α > 0)까지 준다. 지울 때 번짐이 남아 조각이 되지 않게 (D-19)
+    painted = alpha > 0
+    owner_edge, owner_node = _ownership(graph, painted)
     samples = _sample_strokes(strokes, _orientation(alpha, p.orientation_sigma))
     support = _support(graph, strokes, samples, p)
     pairs = _pairs(strokes, samples, support)
@@ -452,7 +484,7 @@ def merge_overdraws(
 
         group_edges = set(dec.edge_ids)
         internal = [nid for nid, inc in incident.items() if inc and inc <= group_edges]
-        candidate = ink & (np.isin(owner_edge, list(group_edges)) | np.isin(owner_node, internal))
+        candidate = painted & (np.isin(owner_edge, list(group_edges)) | np.isin(owner_node, internal))
         cy, cx = np.nonzero(candidate)
         _, nearest = cKDTree(samples.pts[in_group]).query(np.stack([cy, cx], axis=1))
         keep = erasable[np.nonzero(in_group)[0][nearest]]
@@ -467,7 +499,10 @@ def merge_overdraws(
         y0, y1 = max(ys.min() - margin, 0), min(ys.max() + margin + 1, rgba.shape[0])
         x0, x1 = max(xs.min() - margin, 0), min(xs.max() + margin + 1, rgba.shape[1])
 
-        path = _representative(region[y0:y1, x0:x1], dec.gap_px, width, alpha[y0:y1, x0:x1], gp.prune_factor)
+        # 중간선은 잉크로 판정된 픽셀로만 구한다 (옅은 번짐까지 넣으면 영역이 흐려져 고리·가지가 생김).
+        # 지우기는 번짐까지 포함한 region 전체로 한다
+        path = _representative(region[y0:y1, x0:x1] & ink[y0:y1, x0:x1], dec.gap_px, width,
+                               alpha[y0:y1, x0:x1], gp.prune_factor)
         if path is None:
             dec.reason = "대표선이 단일 경로가 아님"
             continue
@@ -492,6 +527,7 @@ def merge_overdraws(
             continue
 
         _compose(out[y0:y1, x0:x1], region[y0:y1, x0:x1], s, color)
+        _drop_leftover_specks(out, region, (y0, y1, x0, x1), gp, stroke_width)
         dec.merged, dec.reason, dec.path = True, "병합", np.rint(path).astype(int) + (y0, x0)
 
     # 겹침은 후보 기준을 넘었지만 겹친 길이가 짧아 후보가 못 된 쌍도 판단 근거로 남긴다

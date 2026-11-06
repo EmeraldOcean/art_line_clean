@@ -159,7 +159,10 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
               f"옮긴 픽셀 {smooth_result.moved_px}, 최대 이동 {smooth_result.max_shift_px:.2f}px, "
               f"떨림 지표 {smooth_result.jitter_before:.3f} → {jitter_after:.3f}px")
     if render_result is not None:
-        print(f"다시 그리기: 획 {render_result.strokes}개 (원본 유지 {render_result.kept_strokes}), "
+        width_note = (f"선 굵기 {render_result.width_before_px:.1f} → "
+                      f"{render_result.width_before_px * render_result.width_scale:.1f}px, "
+                      if render_result.width_scale != 1.0 else f"선 굵기 {render_result.width_before_px:.1f}px 유지, ")
+        print(f"다시 그리기: 획 {render_result.strokes}개 (원본 유지 {render_result.kept_strokes}), {width_note}"
               f"잉크 총량 원본 대비 {render_result.mass_ratio:.2f}, 비생성 잘라냄 {render_result.clipped_px}px")
 
     status = EXIT_OK

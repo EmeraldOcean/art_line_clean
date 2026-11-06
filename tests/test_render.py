@@ -128,3 +128,56 @@ def test_faint_junctions_do_not_turn_into_dark_dots(cases, name):
     faint[..., 3] = (faint[..., 3].astype(np.uint16) * 120 // 255).astype(np.uint8)
     r = render_clean(faint)
     assert int(r.rgba[..., 3].max()) <= int(faint[..., 3].max()) + 2
+
+
+# ---- 원하는 선 굵기 (target_width_px, D-18) -------------------------------------
+
+from lineclean.render import RenderParams  # noqa: E402
+
+
+def _faint(rgba, level=80):
+    out = rgba.copy()
+    out[..., 3] = (out[..., 3].astype(np.uint16) * level // 255).astype(np.uint8)
+    return out
+
+
+def test_target_zero_is_default(cases):
+    a = render_clean(cases["curve"]).rgba
+    b = render_clean(cases["curve"], RenderParams(target_width_px=0.0)).rgba
+    assert np.array_equal(a, b)
+
+
+def test_target_width_sets_brush_width(cases):
+    r = render_clean(cases["curve"], RenderParams(target_width_px=2.0))
+    assert r.width_scale < 1.0
+    assert abs(r.width_before_px * r.width_scale - 2.0) < 1e-6
+    # 불투명한 선은 더 진해질 수 없으므로 가늘어진 만큼 진한 픽셀 수가 줄어든다
+    before = (render_clean(cases["curve"]).rgba[..., 3] >= 128).sum()
+    after = (r.rgba[..., 3] >= 128).sum()
+    assert 0.5 <= after / before <= 0.85
+
+
+def test_thinner_faint_line_gets_darker_and_keeps_ink(cases):
+    faint = _faint(cases["curve"])
+    r = render_clean(faint, RenderParams(target_width_px=1.5))
+    assert 0.85 <= r.mass_ratio <= 1.15  # 잉크 양 유지
+    _, _, strokes = resolved_graph(faint)
+    p = np.concatenate([s.path for s in strokes])
+    assert np.median(r.rgba[p[:, 0], p[:, 1], 3]) >= 1.5 * np.median(faint[p[:, 0], p[:, 1], 3])
+
+
+def test_target_width_keeps_pressure_variation(cases):
+    r = render_clean(cases["tapered"], RenderParams(target_width_px=2.0))
+    _, _, strokes = resolved_graph(r.rgba)
+    w = 2 * max(strokes, key=lambda s: s.length).radius - 1
+    n = len(w)
+    middle = float(np.median(w[2 * n // 5: 3 * n // 5]))
+    ends = float(np.median(np.concatenate([w[: n // 10], w[-n // 10:]])))
+    assert ends < middle
+
+
+@pytest.mark.parametrize("target", [1.0, 6.0, 12.0])
+def test_target_width_never_draws_outside_original_ink(cases, target):
+    for name in ("curve", "cross_30", "y_then_cross"):
+        r = render_clean(cases[name], RenderParams(target_width_px=target))
+        assert not nongeneration_violations(cases[name], r.rgba).any(), (name, target)

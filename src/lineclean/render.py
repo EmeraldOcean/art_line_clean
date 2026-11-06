@@ -64,10 +64,12 @@ class RenderParams:
     profile_sigma_widths: float = 2.0  # 굵기·농도를 획을 따라 부드럽게 하는 σ (선 굵기 배수)
     max_width_ratio: float = 1.5  # 굵기 상한: 획의 보통(중앙값) 굵기의 배수
     fringe_px: float = 0.5  # 마스크로 잰 굵기에서 빼는 번짐 폭
+    target_width_px: float = 0.0  # 원하는 선 굵기(px). 0이면 원본 굵기 유지. 굵기 비율·필압 변화는 유지 (D-18)
     revert_radius_px: float = 10.0  # 위상이 바뀐 곳에서 이 거리 안을 지나는 획은 원본 유지
 
 
 MAX_REVERT_ROUNDS = 3
+MIN_DRAWN_WIDTH_PX = 0.5  # 아무리 가늘게 해도 이보다 가늘게는 그리지 않음
 
 
 @dataclass
@@ -78,6 +80,8 @@ class RenderResult:
     clipped_px: int  # 비생성 마스크로 잘려 나간 픽셀 수
     kept_specks: int  # 획이 없어 원본 그대로 둔 잉크 덩어리 수
     kept_strokes: int  # 위상을 지키려고 다시 그리지 않고 원본으로 둔 획 수
+    width_before_px: float = 0.0  # 측정한 선 굵기 중앙값
+    width_scale: float = 1.0  # 굵기 배율 (target_width_px / 측정 굵기, 0이면 1)
 
 
 def _profile(values: np.ndarray, sigma_px: float, step: float) -> np.ndarray:
@@ -115,13 +119,15 @@ def _measure_geometry(
 
 def _darkness(center: np.ndarray, width: np.ndarray, alpha: np.ndarray, cov: np.ndarray,
               box: tuple[int, int, int, int], sigma: float, step: float, fallback: float,
-              mine: np.ndarray) -> np.ndarray:
+              mine: np.ndarray, boost: float = 1.0) -> np.ndarray:
     """점마다 농도: 그 점 주변 띠(굵기/2 + 1.5px)에서 원본 알파 합 ÷ 다시 그린 덮임 합.
 
     잉크 총량을 띠 단위로 맞춘다. 단순 평균을 쓰면 가는 선은 덮임이 퍼지는 만큼 옅어진다.
     mine(잘라낸 bool)은 이 획이 가장 가까운 획인 픽셀이다. 이웃 획의 잉크까지 세면, 분기점의 짧은 조각처럼
     덮임은 작은데 주변 잉크는 많은 획이 새까만 점이 된다. 그래서 자기 몫의 픽셀만 세고,
     결과도 그 위치 근처 자기 원본 픽셀의 가장 진한 값을 넘지 않게 자른다.
+    width는 원본에서 잰 굵기다(띠를 원본 잉크에 맞추려고). 선을 가늘게 그리면(boost = 1 / 굵기 배율 > 1)
+    같은 잉크 양을 좁은 면적에 담아야 하므로 상한도 그만큼 올린다 (최대 255).
     """
     x0, y0, x1, y1 = box
     ys, xs = np.nonzero(((alpha[y0:y1, x0:x1] > 0) | (cov > 0)) & mine)
@@ -141,7 +147,7 @@ def _darkness(center: np.ndarray, width: np.ndarray, alpha: np.ndarray, cov: np.
     reach = max(int(round(float(np.median(width)) / max(step, 1e-6))), 1)
     cap = ndimage.maximum_filter1d(peak, size=2 * reach + 1, mode="nearest")
     cap = np.where(cap > 0, cap, fallback)
-    return np.clip(dark, 0.0, cap)
+    return np.clip(dark, 0.0, np.minimum(cap * max(boost, 1.0), 255.0))
 
 
 def render_clean(
@@ -164,7 +170,7 @@ def render_clean(
     checks = checks or CheckParams()
     _, _, strokes = resolved_graph(rgba, gp, jp)
     keep_original: set[int] = set()
-    result, clipped, specks = _render(rgba, strokes, keep_original, p, gp, checks)
+    result, clipped, specks, width_before, scale = _render(rgba, strokes, keep_original, p, gp, checks)
     for _ in range(MAX_REVERT_ROUNDS):
         changed = connectivity_changes(rgba, result, gp.ink_threshold)
         if not changed:
@@ -175,17 +181,17 @@ def render_clean(
         if not hit:
             break
         keep_original |= hit
-        result, clipped, specks = _render(rgba, strokes, keep_original, p, gp, checks)
+        result, clipped, specks, width_before, scale = _render(rgba, strokes, keep_original, p, gp, checks)
 
     alpha = rgba[..., 3].astype(np.float64)
     mass = float(result[..., 3].astype(np.float64).sum()) / max(float(alpha.sum()), 1.0)
-    return RenderResult(result, len(strokes), mass, clipped, specks, len(keep_original))
+    return RenderResult(result, len(strokes), mass, clipped, specks, len(keep_original), width_before, scale)
 
 
 def _render(
     rgba: np.ndarray, strokes, keep_original: set[int], p: RenderParams, gp: GraphParams, checks: CheckParams
-) -> tuple[np.ndarray, int, int]:
-    """(다시 그린 RGBA, 비생성으로 잘라 낸 픽셀 수, 원본 그대로 둔 잉크 덩어리 수)."""
+) -> tuple[np.ndarray, int, int, float, float]:
+    """(다시 그린 RGBA, 비생성으로 잘라 낸 픽셀 수, 원본 그대로 둔 잉크 덩어리 수, 측정 굵기, 굵기 배율)."""
     alpha = rgba[..., 3]
     h, w = alpha.shape
     out_a = np.zeros((h, w))
@@ -203,27 +209,38 @@ def _render(
         owner = owner_seed[oy, ox] - 1
     else:
         owner = np.full((h, w), -1, dtype=np.int64)
+    measured = {}
     for s in strokes:
         covered[s.path[:, 0], s.path[:, 1]] = True
         if s.id in keep_original:
             original_zone[s.path[:, 0], s.path[:, 1]] = True
+        elif len(s.path) >= 2:
+            measured[s.id] = _measure_geometry(s, alpha, p, global_width)
+
+    # 원하는 굵기: 그림 전체의 측정 굵기 중앙값이 target이 되도록 모든 획에 같은 배율을 곱한다.
+    # 획 사이 굵기 차이와 획 안의 필압 변화는 그대로 남는다 (F-D: 굵기를 획일화하지 않음)
+    all_w = np.concatenate([m[1] for m in measured.values()]) if measured else np.ones(1)
+    width_before = float(np.median(all_w))
+    scale = p.target_width_px / width_before if p.target_width_px > 0 else 1.0
+
+    for s in strokes:
+        if s.id not in measured:
             continue
-        if len(s.path) < 2:
-            continue
-        center, width, sigma, step = _measure_geometry(s, alpha, p, global_width)
+        center, width, sigma, step = measured[s.id]
+        drawn = np.maximum(width * scale, MIN_DRAWN_WIDTH_PX)
         arc = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(center, axis=0).T))])
         frac = arc / arc[-1] if arc[-1] > 0 else np.linspace(0, 1, len(arc))
 
-        def width_fn(t: np.ndarray, frac=frac, width=width) -> np.ndarray:
-            return np.interp(t, frac, width)
+        def width_fn(t: np.ndarray, frac=frac, drawn=drawn) -> np.ndarray:
+            return np.interp(t, frac, drawn)
 
-        r = int(np.ceil(width.max() / 2)) + 2
+        r = int(np.ceil(max(width.max(), drawn.max()) / 2)) + 2
         y0, y1 = max(int(center[:, 0].min()) - r, 0), min(int(center[:, 0].max()) + r + 1, h)
         x0, x1 = max(int(center[:, 1].min()) - r, 0), min(int(center[:, 1].max()) + r + 1, w)
         # 픽셀 인덱스 i의 중심은 붓 좌표로 i + 0.5다
         cov = stroke_coverage([(center[:, ::-1] + 0.5, width_fn)], (x0, y0, x1, y1)) / 255.0
         darkness = _darkness(center, width, alpha, cov, (x0, y0, x1, y1), sigma, step,
-                             float(np.median(s.alpha)), owner[y0:y1, x0:x1] == s.id)
+                             float(np.median(s.alpha)), owner[y0:y1, x0:x1] == s.id, boost=1.0 / scale)
         ys, xs = np.nonzero(cov > 0)
         if not len(ys):
             continue
@@ -258,4 +275,4 @@ def _render(
     result = np.zeros_like(rgba)
     result[..., :3] = np.clip(np.rint(out_rgb), 0, 255).astype(np.uint8)
     result[..., 3] = np.clip(np.rint(out_a), 0, 255).astype(np.uint8)
-    return result, clipped, int(len(np.unique(labels[speck])))
+    return result, clipped, int(len(np.unique(labels[speck]))), width_before, scale

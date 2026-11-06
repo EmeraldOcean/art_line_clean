@@ -59,6 +59,8 @@ Copy-Item lineclean.default.toml configs\try1.toml
 uv run python -m lineclean .\samples\input\rough.png -o .\output\try1.png --merge-ids 3,7 --smooth --render --config configs\try1.toml
 ```
 
+선 굵기를 바꾸려면 `[render] target_width_px`에 원하는 굵기(px)를 적는다(0이면 원본 굵기). 필압에 따른 굵기 변화는 비율대로 남고, 가늘어진 만큼 진하게 그려 잉크 양을 유지한다.
+
 잘못된 키나 범위 밖 값은 실행 전에 이유와 함께 거부한다. 설정을 바꾸면 덧그림 후보 번호가 달라질 수 있으니 `--merge`로 번호부터 다시 확인한다.
 
 처리 후에는 항상 위상 검사(처리 영역 밖의 교차·분기·끝점이 그대로인지)를 출력한다.

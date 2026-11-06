@@ -123,3 +123,9 @@ def test_cli_shipped_config_equals_no_config(tmp_path, cases, monkeypatch):
     b, _ = load_rgba(tmp_path / "out" / "b.png")
     c, _ = load_rgba(tmp_path / "out" / "c.png")
     assert np.array_equal(b, c)
+
+
+@pytest.mark.parametrize("value", [-1, 51])
+def test_target_width_range(value):
+    with pytest.raises(ConfigError, match="target_width_px"):
+        config_from_dict({"render": {"target_width_px": value}})

@@ -88,6 +88,7 @@ RANGES: dict[tuple[str, str], tuple[float | None, float | None]] = {
     ("smooth", "corner_deg"): (1, 180),
     ("smooth", "min_shift_px"): (0, None),
     ("render", "fringe_px"): (0, None),
+    ("render", "target_width_px"): (0, 50),
     ("checks", "nongeneration_d"): (1, 2),
     ("checks", "topology_ignore_px"): (0, None),
 }

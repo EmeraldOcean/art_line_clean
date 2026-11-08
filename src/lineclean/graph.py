@@ -88,6 +88,20 @@ def _neighbor_codes(skel: np.ndarray) -> np.ndarray:
     return ndimage.correlate(skel.astype(np.int32), _RING_WEIGHTS, mode="constant") * skel
 
 
+def cluster_pixels(labels: np.ndarray, n: int) -> list[np.ndarray]:
+    """라벨 1..n 각각의 픽셀 좌표 (행 우선 순서, np.argwhere(labels == i)와 같음).
+
+    라벨마다 그림 전체를 다시 훑지 않고 한 번에 모은다 (M7: 큰 그림에서 이 부분이 대부분의 시간을 썼음).
+    """
+    coords = np.argwhere(labels > 0)
+    if n == 0:
+        return []
+    order = np.argsort(labels[coords[:, 0], coords[:, 1]], kind="stable")
+    coords = coords[order]
+    counts = np.bincount(labels[coords[:, 0], coords[:, 1]], minlength=n + 1)[1:]
+    return np.split(coords, np.cumsum(counts)[:-1])
+
+
 def graph_from_skeleton(skel: np.ndarray, dist: np.ndarray, alpha: np.ndarray) -> StrokeGraph:
     """스켈레톤 픽셀을 노드와 엣지로 나눈다.
 
@@ -114,8 +128,8 @@ def graph_from_skeleton(skel: np.ndarray, dist: np.ndarray, alpha: np.ndarray) -
     # 이웃 4개 이상은 덩어리 수와 관계없이 분기로 본다: 대각선 두 선이 2×2 블록으로 교차하면
     # 각 픽셀의 덩어리 수는 2지만 실제로는 교차점이다.
     labels, n_clusters = ndimage.label(skel & ((runs >= 3) | (count >= 4)), structure=EIGHT)
-    for i in range(1, n_clusters + 1):
-        add_node(np.argwhere(labels == i), JUNCTION)
+    for pixels in cluster_pixels(labels, n_clusters):
+        add_node(pixels, JUNCTION)
     for yx in np.argwhere(skel & (runs <= 1) & (count <= 2)):
         add_node(yx[None], ENDPOINT)
 

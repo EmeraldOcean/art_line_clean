@@ -150,3 +150,37 @@ def test_synthetic_cases_satisfy_invariants(method):
         g, dist = extract_graph(rgba, ink_mask(rgba), method)
         _check_invariants(g, g.pixel_mask())
         assert g.edges, name
+
+
+# ---- M7: 분기점 덩어리를 한 번에 모으기 (결과는 예전 방식과 같아야 함) ----
+
+def test_cluster_pixels_matches_per_label_scan():
+    from scipy import ndimage
+
+    from lineclean.graph import cluster_pixels
+
+    rng = np.random.default_rng(0)
+    labels, n = ndimage.label(rng.random((120, 90)) > 0.8, structure=np.ones((3, 3)))
+    got = cluster_pixels(labels, n)
+    assert len(got) == n
+    for i, pixels in enumerate(got, start=1):
+        assert np.array_equal(pixels, np.argwhere(labels == i))  # 예전 방식: 라벨마다 전체를 훑음
+    assert cluster_pixels(np.zeros((5, 5), int), 0) == []
+
+
+def test_real_case_graphs_unchanged_by_cluster_grouping(monkeypatch):
+    import lineclean.graph as graph_mod
+    from lineclean.mask import ink
+    from lineclean.synthetic import generate_all
+
+    def old(labels, n):
+        return [np.argwhere(labels == i) for i in range(1, n + 1)]
+
+    for name, rgba in generate_all().items():
+        new_graph, _ = graph_mod.extract_graph(rgba, ink(rgba))
+        with monkeypatch.context() as m:
+            m.setattr(graph_mod, "cluster_pixels", old)
+            old_graph, _ = graph_mod.extract_graph(rgba, ink(rgba))
+        assert [n.yx for n in new_graph.nodes] == [n.yx for n in old_graph.nodes], name
+        assert all(np.array_equal(a.path, b.path) for a, b in zip(new_graph.edges, old_graph.edges)), name
+        assert len(new_graph.edges) == len(old_graph.edges), name

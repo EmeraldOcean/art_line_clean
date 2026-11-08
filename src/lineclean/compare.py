@@ -107,10 +107,11 @@ SKIPPED_COLOR = (255, 140, 0)  # 병합하지 않은 후보
 LABEL_TEXT_COLOR = (0, 0, 0)
 
 
-def merge_overlay(rgba: np.ndarray, result, scale: int = 2) -> Image.Image:
+def merge_overlay(rgba: np.ndarray, result, scale: int = 2, labels: bool = True) -> Image.Image:
     """병합 판정 시각화: 병합된 원래 선은 연두, 대표 중간선은 진한 초록, 병합하지 않은 후보는 주황.
 
     후보마다 번호를 흰 상자에 적는다. 사용자는 이 번호를 --merge-ids로 고른다.
+    labels=False면 번호를 적지 않는다 (GUI가 직접 그림). 번호 위치는 candidate_label_points.
     """
     h, w = rgba.shape[:2]
     faint = rgba.copy()
@@ -132,11 +133,11 @@ def merge_overlay(rgba: np.ndarray, result, scale: int = 2) -> Image.Image:
     if scale != 1:
         img = img.resize((w * scale, h * scale), Image.Resampling.NEAREST)
 
+    if not labels:
+        return img
     draw = ImageDraw.Draw(img)
-    for d in candidates:
-        pts = np.concatenate([edges[eid].path for eid in d.edge_ids])
+    for d, (cy, cx) in candidate_label_points(result):
         # 후보 선 위가 아니라 옆에 적는다: 가운데 점에서 오른쪽 위로 비켜서
-        cy, cx = pts[np.argsort(pts[:, 0])[len(pts) // 2]]
         x, y = (cx + 4) * scale, (cy - 6) * scale
         label = str(d.candidate)
         left, top, right, bottom = draw.textbbox((x, y), label)
@@ -144,6 +145,18 @@ def merge_overlay(rgba: np.ndarray, result, scale: int = 2) -> Image.Image:
                        outline=MERGED_PATH_COLOR if d.merged else SKIPPED_COLOR)
         draw.text((x, y), label, fill=LABEL_TEXT_COLOR)
     return img
+
+
+def candidate_label_points(result) -> list:
+    """[(후보 GroupDecision, 번호를 붙일 기준점 (y, x))]: 기준점은 후보 선을 y로 정렬한 가운데 점."""
+    edges = {e.id: e for e in result.graph.edges}
+    out = []
+    for d in result.decisions:
+        if d.candidate is None:
+            continue
+        pts = np.concatenate([edges[eid].path for eid in d.edge_ids])
+        out.append((d, tuple(int(v) for v in pts[np.argsort(pts[:, 0])[len(pts) // 2]])))
+    return out
 
 
 TOPO_COLORS = {"X": (220, 0, 0), "T/Y": (255, 140, 0), "끝점": (0, 170, 0), "기타": (150, 0, 200)}

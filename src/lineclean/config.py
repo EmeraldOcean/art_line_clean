@@ -161,3 +161,72 @@ def load_config(path: str | Path | None = None) -> Config:
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"설정 파일 형식 오류 ({path}): {e}") from None
     return config_from_dict(data, source=str(path))
+
+
+# ---- 설정 쓰기·설명 읽기 (M7 GUI, D-20) ------------------------------------------
+
+TEMPLATE_NAME = "lineclean.default.toml"
+TEMPLATE_PATH = Path(__file__).resolve().parents[2] / TEMPLATE_NAME  # 저장소 루트의 템플릿
+
+
+def config_sections(cfg: Config) -> dict[str, object]:
+    """섹션 이름 → 파라미터 dataclass (Config 필드 순서)."""
+    return {f.name: getattr(cfg, f.name) for f in fields(Config) if f.name != "source"}
+
+
+def config_to_toml(cfg: Config, header: str = "") -> str:
+    """모든 파라미터를 TOML 문자열로. load_config로 다시 읽으면 같은 값이 된다."""
+    lines = [f"# {line}" for line in header.splitlines()]
+    for name, params in config_sections(cfg).items():
+        if lines:
+            lines.append("")
+        lines.append(f"[{name}]")
+        for f in fields(params):
+            value = getattr(params, f.name)
+            lines.append(f"{f.name} = {value!r}")
+    return "\n".join(lines) + "\n"
+
+
+@dataclass(frozen=True)
+class ParamDoc:
+    text: str  # 템플릿 주석 ([권장 조정]/[주의] 표시는 뺌)
+    level: str  # "recommended"([권장 조정]) / "caution"([주의]) / "normal"(표시 없음)
+
+
+def param_docs(template: str | Path = TEMPLATE_PATH) -> tuple[dict[tuple[str, str], ParamDoc], dict[str, str]]:
+    """템플릿의 키 바로 앞 주석을 (섹션, 키)별 설명으로 읽는다. 섹션 제목도 함께.
+
+    템플릿이 없으면 빈 dict (도움말 없이 동작).
+    """
+    path = Path(template)
+    if not path.is_file():
+        return {}, {}
+    docs: dict[tuple[str, str], ParamDoc] = {}
+    titles: dict[str, str] = {}
+    section = None
+    comment: list[str] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("#"):
+            text = line[1:].strip()
+            if text.startswith("[") and "]" in text and text[1:text.index("]")] in config_sections(Config()):
+                titles[text[1:text.index("]")]] = text[text.index("]") + 1:].strip()
+                comment = []
+            elif set(text) <= {"-", "="}:
+                comment = []
+            else:
+                comment.append(line[1:].rstrip()[1:] if line[1:].startswith(" ") else line[1:])
+        elif line.startswith("[") and line.endswith("]"):
+            section, comment = line[1:-1], []
+        elif "=" in line and section is not None:
+            key = line.split("=", 1)[0].strip()
+            text = "\n".join(comment).strip()
+            level = "normal"
+            for marker, name in (("[권장 조정]", "recommended"), ("[주의]", "caution")):
+                if text.startswith(marker):
+                    level, text = name, text[len(marker):].strip()
+            docs[(section, key)] = ParamDoc(text, level)
+            comment = []
+        else:
+            comment = []
+    return docs, titles

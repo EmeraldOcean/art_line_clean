@@ -42,6 +42,21 @@ uv run python -m lineclean .\samples\input\rough.png -o .\output\clean.png --mer
 uv run python -m lineclean .\samples\input\rough.png -o .\output\clean.png --merge-ids 3,7 --smooth --render
 ```
 
+## GUI (M7)
+```powershell
+uv run python -m lineclean.gui                              # 창을 연 뒤 PNG를 끌어다 놓기
+uv run python -m lineclean.gui .\samples\input\test.png   # 바로 열기
+uv run python -m lineclean.gui --browser                    # 창 대신 브라우저에서 (127.0.0.1)
+```
+- 왼쪽 원본 | 가운데 결과 | 오른쪽 파라미터. 슬라이더를 놓으면 다시 계산합니다 (바꾼 단계부터만).
+- 보기: 결과 / 차이 / 위상 / 병합 후보. 확대·이동은 두 칸이 함께 움직입니다 (휠 확대, 끌어서 이동, 0 = 맞춤, 1 = 100%).
+- 병합 후보 보기에서 선이나 번호를 클릭하면 그 후보를 고르거나 뺍니다 (`--merge-ids`와 같음).
+- 파라미터 이름에 마우스를 올리면 설명이 나오고, 더블클릭하면 기본값으로 돌아갑니다. ●는 기본값과 다른 값입니다.
+- 저장(⌘S / Ctrl+S)은 새 파일로만 합니다 (입력 폴더·기존 파일 거부). `_settings.toml`을 함께 저장하면
+  그 파일 맨 위에 적힌 CLI 명령으로 같은 결과를 다시 만들 수 있습니다. 비생성 위반이 있으면 저장하지 않습니다.
+- 시작 설정은 현재 폴더의 `lineclean.toml`(없으면 기본값)입니다.
+- Windows는 WebView2(Edge) 런타임을 씁니다 (Windows 10/11에 보통 설치되어 있음).
+
 ## 파라미터 조정 (설정 파일)
 모든 파라미터는 템플릿 [lineclean.default.toml](lineclean.default.toml)에 기본값·주석과 함께 정리되어 있다.
 템플릿은 직접 고치지 말고 `lineclean.toml`로 복사해 쓴다. `lineclean.toml`은 내 설정 파일이라 git에 올라가지 않는다.

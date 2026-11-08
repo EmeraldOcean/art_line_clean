@@ -129,3 +129,67 @@ def test_cli_shipped_config_equals_no_config(tmp_path, cases, monkeypatch):
 def test_target_width_range(value):
     with pytest.raises(ConfigError, match="target_width_px"):
         config_from_dict({"render": {"target_width_px": value}})
+
+
+# ---- M7: 설정 쓰기·설명·슬라이더 범위 ----
+
+def test_config_to_toml_round_trip(tmp_path):
+    from dataclasses import replace as _replace
+
+    from lineclean.config import config_to_toml
+
+    cfg = Config()
+    cfg = _replace(cfg, render=_replace(cfg.render, target_width_px=3.5, fringe_px=0.2),
+                   graph=_replace(cfg.graph, ink_threshold=20))
+    path = tmp_path / "s.toml"
+    path.write_text(config_to_toml(cfg, "머리말\n두 줄"), encoding="utf-8")
+    back = load_config(path)
+    assert _replace(back, source="") == _replace(cfg, source="")
+    assert path.read_text(encoding="utf-8").startswith("# 머리말\n# 두 줄\n")
+
+
+def test_param_docs_cover_every_key():
+    from dataclasses import fields as _fields
+
+    from lineclean.config import config_sections, param_docs
+
+    docs, titles = param_docs()
+    keys = {(s, f.name) for s, p in config_sections(Config()).items() for f in _fields(p)}
+    assert set(docs) == keys
+    assert all(d.text for d in docs.values())
+    assert set(titles) == {s for s, _ in keys}
+    assert docs[("render", "target_width_px")].level == "recommended"
+    assert docs[("checks", "nongeneration_d")].level == "caution"
+    assert not any(d.text.startswith("[") for d in docs.values())
+
+
+def test_param_docs_missing_template(tmp_path):
+    from lineclean.config import param_docs
+
+    assert param_docs(tmp_path / "없음.toml") == ({}, {})
+
+
+def test_slider_specs_inside_valid_ranges():
+    from dataclasses import fields as _fields
+
+    from lineclean.config import RANGES, config_sections
+    from lineclean.gui.slider_spec import SPECS
+
+    cfg = Config()
+    keys = {(s, f.name) for s, p in config_sections(cfg).items() for f in _fields(p)}
+    assert set(SPECS) == keys
+    for (section, key), spec in SPECS.items():
+        default = getattr(getattr(cfg, section), key)
+        low, high = RANGES.get((section, key), (None, None))
+        if (section, key) not in RANGES:
+            assert spec.low > 0, key  # "0보다 커야 함"
+        if low is not None:
+            assert spec.low >= low, key
+        if high is not None:
+            assert spec.high <= high, key
+        assert spec.low <= default <= spec.high, key
+        # 기본값이 칸 위에 있다 (슬라이더로 정확히 돌아갈 수 있음)
+        assert spec.value_at(spec.tick_of(default), isinstance(default, int)) == default, key
+        # 모든 칸의 값이 설정 검증을 통과한다
+        for tick in (0, spec.ticks):
+            config_from_dict({section: {key: spec.value_at(tick, isinstance(default, int))}})

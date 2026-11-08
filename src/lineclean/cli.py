@@ -2,7 +2,7 @@
 
 기본은 항등(identity) 처리다. --merge를 주면 덧그은 선 병합(M2)을 켠다 (자동: 확실한 후보만).
 --merge-ids 3,7을 주면 오버레이에 번호로 표시된 후보 중 고른 것만 병합한다 (D-10).
-흐름: 입력 → 처리 → 출력 → 비교 시트(·병합 기록) → 무결성 검사.
+흐름: 입력 → 처리 → 출력 → 비교 시트(·병합 기록) → 무결성 검사. 처리·검사는 pipeline.py (GUI와 공용).
 파라미터는 --config(기본: 현재 폴더의 lineclean.toml)에서 읽는다 (D-15).
 """
 
@@ -13,9 +13,7 @@ import csv
 import io as stdio
 from pathlib import Path
 
-import numpy as np
-
-from lineclean.compare import dilate, make_sheet, merge_overlay, nongeneration_violations, topology_overlay
+from lineclean.compare import make_sheet, merge_overlay, topology_overlay
 from lineclean.io import (
     OutputPathError,
     UnsupportedImageError,
@@ -25,10 +23,10 @@ from lineclean.io import (
     save_rgba,
 )
 from lineclean.config import DEFAULT_CONFIG_NAME, Config, ConfigError, load_config
-from lineclean.junction import compare_topology, connectivity_changes, node_class, resolved_graph, topology
-from lineclean.merge import decisions_table, merge_overdraws
-from lineclean.render import render_clean, speck_px
-from lineclean.smooth import jitter_index, smooth_lines
+from lineclean.junction import node_class, resolved_graph
+from lineclean.merge import decisions_table
+from lineclean.pipeline import Options, run_checks, run_stages
+from lineclean.smooth import jitter_index
 
 EXIT_OK = 0
 EXIT_INTEGRITY = 1  # 원본이 바뀌었거나 비생성 검사 실패
@@ -89,7 +87,7 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
         merge_ids: set[int] | None = None, topo_overlay: bool = False, smooth: bool = False,
         render: bool = False, config: Config | None = None) -> int:
     cfg = config or Config()
-    gp, jp, checks = cfg.graph, cfg.junction, cfg.checks
+    gp, jp = cfg.graph, cfg.junction
     if not input_path.is_file():
         print(f"입력 파일이 없습니다: {input_path}")
         return EXIT_USAGE
@@ -115,19 +113,14 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
             note = ", 색 정보는 버림" if info.color_discarded else ""
             print(f"알림: {info.source_mode} 입력을 밝기→알파 규칙으로 변환했습니다{note}.")
 
+        mode = "pick" if merge_ids is not None else ("auto" if merge else "off")
+        options = Options(merge=mode, merge_ids=frozenset(merge_ids or ()), smooth=smooth, render=render)
         try:
-            merge_result = merge_overdraws(original, cfg.merge, merge_ids, gp, jp, checks) if merge else None
+            stages = run_stages(original, cfg, options)
         except ValueError as e:
             raise OutputPathError(str(e)) from None  # 아무것도 쓰기 전에 사용 오류로 끝낸다
-        result = merge_result.rgba if merge_result else original.copy()
-        smooth_input = result
-        smooth_result = smooth_lines(result, cfg.smooth, gp, jp) if smooth else None
-        if smooth_result is not None:
-            result = smooth_result.rgba
-        render_input = result
-        render_result = render_clean(result, cfg.render, gp, jp, checks) if render else None
-        if render_result is not None:
-            result = render_result.rgba
+        result = stages.rgba
+        merge_result, smooth_result, render_result = stages.merge, stages.smooth, stages.render
 
         save_rgba(result, output_path, protected)
         if sheet_path is not None:
@@ -169,46 +162,12 @@ def run(input_path: Path, output_path: Path, sheet_path: Path | None, merge: boo
     if file_sha256(input_path) != hash_before:
         print("실패: 입력 파일이 처리 중에 바뀌었습니다.")
         status = EXIT_INTEGRITY
-    violations = int(nongeneration_violations(original, result, checks.nongeneration_d).sum())
-    print(f"비생성 검사 (d={checks.nongeneration_d}px): 위반 {violations}픽셀")
-    if violations:
-        status = EXIT_INTEGRITY
-
-    # 다시 그리기는 가장자리를 전부 바꾸므로 골격 위상(X/T/Y)이 아니라 잉크 연결로 확인한다 (D-14)
-    if render_result is not None:
-        conn = connectivity_changes(render_input, result, gp, speck_px(render_result.width_before_px))
-        if conn:
-            print(f"다시 그리기 연결 검사: {len(conn)}곳 바뀜")
-            for kind, (y, x) in conn[:10]:
-                print(f"  {kind} (y={y:.0f}, x={x:.0f})")
+    for check in run_checks(stages, cfg):
+        print(check.message)
+        for line in check.details:
+            print(line)
+        if not check.ok:
             status = EXIT_INTEGRITY
-        else:
-            print("다시 그리기 연결 검사: 변화 없음 (선이 새로 붙거나 끊기지 않음)")
-
-    # 위상 검사: 처리로 바뀐 픽셀 근처(의도한 변화)를 빼고 X/T/Y·끝점이 그대로인지 본다 (D-11)
-    before = topology(original, gp, jp)
-    after = before if np.array_equal(original, result) else topology(result, gp, jp)
-    changed = dilate(np.any(original != result, axis=-1), checks.topology_ignore_px)
-    problems = compare_topology(before, after, ignore=changed)
-    counts = ", ".join(f"{k} {v}" for k, v in after.counts().items())
-    if problems:
-        print(f"위상 검사: 처리 영역 밖에서 {len(problems)}곳 바뀜 ({counts})")
-        for m in problems[:10]:
-            print(f"  {m}")
-        status = EXIT_INTEGRITY
-    else:
-        print(f"위상 검사: 처리 영역 밖 변화 없음 ({counts})")
-
-    # 평활은 노드를 고정하므로 평활 전후 위상이 영역 제외 없이 완전히 같아야 한다 (D-12)
-    if smooth_result is not None:
-        strict = compare_topology(topology(smooth_input, gp, jp), topology(smooth_result.rgba, gp, jp))
-        if strict:
-            print(f"평활 위상 검사: {len(strict)}곳 바뀜")
-            for m in strict[:10]:
-                print(f"  {m}")
-            status = EXIT_INTEGRITY
-        else:
-            print("평활 위상 검사: 변화 없음")
     return status
 
 

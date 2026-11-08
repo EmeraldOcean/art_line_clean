@@ -28,6 +28,8 @@
 | junction.py | 얕은 X 교차 정리, 위상 요약·비교 | M3 |
 | smooth.py | 떨림 완화 (중심선 평활 + 원본 픽셀 옮기기) | M4 |
 | render.py | 획 렌더링 (원형 브러시, 합성 이미지·M2 병합선 공유), M5 깔끔한 선화 다시 그리기 | M2, M5 |
+| pipeline.py | 단계 실행(병합→평활→다시 그리기)·단계별 캐시·무결성 검사, CLI와 GUI 공용 | M7 |
+| gui/ | GUI: api(화면이 부르는 Python 쪽), app(pywebview 창), devserver(--browser), static/(HTML·CSS·JS), slider_spec·export | M7 |
 
 ## 4. 알고리즘 후보와 현재 판단
 **그래프 추출은 확정(D-8)**: `skeletonize` + α ≥ 16, 블러·히스테리시스 없음, 잔가지 가지치기.

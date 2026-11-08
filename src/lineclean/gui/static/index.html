@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lineclean</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">lineclean</div>
+  <button class="btn" id="open-btn" title="PNG 열기 (⌘O / Ctrl+O)">
+    <svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    열기
+  </button>
+  <div class="file" id="file-chip" hidden></div>
+  <div class="spacer"></div>
+  <div class="seg" id="view-seg" role="tablist" aria-label="결과 보기">
+    <button data-view="result" class="on">결과</button>
+    <button data-view="diff">차이</button>
+    <button data-view="topology">위상</button>
+    <button data-view="candidates">병합 후보</button>
+  </div>
+  <div class="seg zoom" aria-label="확대">
+    <button id="zoom-out" title="축소">−</button>
+    <button id="zoom-fit" title="창에 맞춤 (0)">맞춤</button>
+    <button id="zoom-100" title="실제 크기 (1)"><span id="zoom-read">100%</span></button>
+    <button id="zoom-in" title="확대">+</button>
+  </div>
+  <button class="btn primary" id="save-top" title="결과 저장 (⌘S / Ctrl+S)">
+    <svg class="ic" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg>
+    저장
+  </button>
+</header>
+
+<main class="work">
+  <section class="pane" id="left-pane">
+    <div class="cap"><span>원본</span><span class="muted">읽기 전용</span></div>
+    <div class="viewport" id="left-vp">
+      <div class="canvas"><img alt="" draggable="false"></div>
+      <div class="drop" id="drop">
+        <div class="drop-inner">
+          <svg class="ic big" viewBox="0 0 24 24"><path d="M12 16V4m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+          <div class="drop-title">PNG를 끌어다 놓으세요</div>
+          <div class="muted">원본 파일은 바뀌지 않습니다</div>
+          <button class="btn" id="drop-open">파일 선택</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane" id="right-pane">
+    <div class="cap"><span id="view-title">결과</span><span class="busy" id="busy" hidden><i class="spin"></i>계산 중</span><span class="muted" id="timing"></span></div>
+    <div class="viewport" id="right-vp">
+      <div class="canvas"><img alt="" draggable="false"></div>
+      <div class="labels" id="labels"></div>
+      <div class="empty muted" id="right-empty">결과가 여기에 나옵니다</div>
+    </div>
+    <div class="foot">
+      <div class="chips" id="chips"></div>
+      <div class="muted notes" id="notes"></div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <div class="scroll" id="panel-scroll">
+      <div class="card">
+        <div class="card-title">단계</div>
+        <div class="row-label">덧그림 병합</div>
+        <div class="seg full" id="merge-seg">
+          <button data-mode="off">끄기</button>
+          <button data-mode="auto" class="on">자동</button>
+          <button data-mode="pick">고르기</button>
+        </div>
+        <div class="hint" id="pick-hint"></div>
+        <label class="switch-row"><span>떨림 완화</span><input type="checkbox" id="smooth-sw" class="switch" checked></label>
+        <label class="switch-row"><span>다시 그리기</span><input type="checkbox" id="render-sw" class="switch" checked></label>
+      </div>
+      <div id="param-cards"></div>
+      <button class="btn wide" id="advanced-btn">고급 설정 보기</button>
+      <button class="btn wide ghosty" id="reset-btn" title="모든 파라미터를 코드 기본값으로">모두 기본값으로</button>
+    </div>
+    <div class="save-box">
+      <label class="switch-row small"><span>비교 시트도 저장</span><input type="checkbox" id="sheet-sw" class="switch" checked></label>
+      <label class="switch-row small"><span>설정 파일(.toml)도 저장</span><input type="checkbox" id="settings-sw" class="switch" checked></label>
+      <button class="btn primary wide tall" id="save-btn">PNG로 저장</button>
+    </div>
+  </aside>
+</main>
+
+<div class="tip" id="tip" hidden></div>
+<div class="toast" id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

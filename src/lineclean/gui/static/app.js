@@ -196,7 +196,9 @@ function setMode(mode) {
   for (const b of $$("#merge-seg button")) b.classList.toggle("on", b.dataset.mode === mode);
   const hint = $("#pick-hint");
   if (mode === "pick") {
+    const refused = (state.result && state.result.refused || []).map((r) => r.n);
     hint.textContent = "고른 후보: " + (state.selection.length ? state.selection.join(", ") : "없음") +
+      (refused.length ? ` (병합 안 됨: ${refused.join(", ")})` : "") +
       " · '병합 후보' 보기에서 선을 클릭해 켜고 끕니다";
   } else if (mode === "auto") {
     hint.textContent = "확실한 후보만 자동으로 병합합니다";
@@ -228,7 +230,10 @@ async function run() {
   state.result = res;
   state.selection = res.selection;
   setMode(res.mode);
-  if (res.notice) toast(res.notice);
+  const refusedNote = res.refused.length
+    ? "고른 후보 중 병합하지 않은 것 (애매하면 합치지 않음):\n" + res.refused.map((r) => `${r.n}번 — ${r.reason}`).join("\n")
+    : "";
+  if (res.notice || refusedNote) toast([res.notice, refusedNote].filter(Boolean).join("\n"), !!refusedNote);
   await showView(id);
   if (id !== state.reqId) return;
   setBusy(false);
@@ -256,7 +261,7 @@ function renderChips(checks) {
     const c = document.createElement("span");
     c.className = "chip " + (k.ok ? "ok" : "bad");
     c.textContent = (k.ok ? "✓ " : "✕ ") + k.label;
-    attachTip(c, () => k.message);
+    attachTip(c, () => k.tip);
     host.append(c);
   }
 }
@@ -336,11 +341,14 @@ function drawLabels() {
   const { s, tx, ty } = state.z;
   for (const c of res.candidates) {
     const el = document.createElement("div");
-    el.className = "label" + (c.merged ? " merged" : "");
-    el.textContent = c.n;
+    const refused = c.picked && !c.merged;
+    el.className = "label" + (c.merged ? " merged" : refused ? " refused" : "");
+    el.textContent = refused ? `${c.n} ✕` : c.n;
     el.style.left = tx + (c.x + 0.5) * s + "px";
     el.style.top = ty + (c.y + 0.5) * s + "px";
-    el.title = c.merged ? `후보 ${c.n}: 병합됨` : `후보 ${c.n}: 병합 안 함`;
+    el.title = c.merged ? `후보 ${c.n}: 병합됨`
+      : refused ? `후보 ${c.n}: 골랐지만 병합하지 않음 — ${c.reason}`
+      : `후보 ${c.n}: 병합 안 함 (클릭해서 고르기)`;
     el.addEventListener("pointerdown", (e) => e.stopPropagation());
     el.addEventListener("click", (e) => { e.stopPropagation(); toggleCandidate({ number: c.n }); });
     host.append(el);
@@ -354,7 +362,7 @@ async function toggleCandidate({ number = null, y = null, x = null }) {
   if (r.error) { toast(r.error, true); return; }
   state.selection = r.selection;
   setMode("pick");
-  toast((r.notice ? r.notice + "\n" : "") + `후보 ${r.number} ${r.selection.includes(r.number) ? "고름" : "뺌"}`);
+  if (r.notice) toast(r.notice);
   schedule(true);
 }
 
@@ -436,27 +444,31 @@ async function save() {
 }
 
 function setupDrop() {
-  // 창 모드에서는 Python이 끌어다 놓기를 받는다 (실제 파일 경로가 필요). 브라우저 모드만 여기서 처리.
+  // 끌어다 놓기는 원본 칸에서만 받는다. 결과 칸은 금지 표시만 보이고 아무것도 열지 않는다.
+  // 창 모드에서는 Python이 원본 칸의 drop을 받는다 (실제 파일 경로가 필요). 브라우저 모드만 여기서 연다.
   const browser = document.documentElement.dataset.mode === "browser";
-  for (const vp of [$("#left-vp"), $("#right-vp")]) {
-    vp.addEventListener("dragenter", (e) => { e.preventDefault(); vp.classList.add("over"); });
-    vp.addEventListener("dragover", (e) => { e.preventDefault(); vp.classList.add("over"); });
-    vp.addEventListener("dragleave", (e) => { if (!vp.contains(e.relatedTarget)) vp.classList.remove("over"); });
-    vp.addEventListener("drop", (e) => {
-      vp.classList.remove("over");
-      if (!browser) return;
-      e.preventDefault();
-      const file = Array.from(e.dataTransfer.files).find((f) => f.name.toLowerCase().endsWith(".png"));
-      if (!file) { toast("PNG 파일만 열 수 있습니다.", true); return; }
-      const reader = new FileReader();
-      reader.onload = async () => opened(await API.open_bytes(file.name, reader.result));
-      reader.readAsDataURL(file);
-    });
-  }
-  if (browser) {
-    document.addEventListener("dragover", (e) => e.preventDefault());
-    document.addEventListener("drop", (e) => e.preventDefault());
-  }
+  const vp = $("#left-vp");
+  vp.addEventListener("dragenter", (e) => { e.preventDefault(); vp.classList.add("over"); });
+  vp.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; vp.classList.add("over"); });
+  vp.addEventListener("dragleave", (e) => { if (!vp.contains(e.relatedTarget)) vp.classList.remove("over"); });
+  vp.addEventListener("drop", (e) => {
+    vp.classList.remove("over");
+    if (!browser) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const file = Array.from(e.dataTransfer.files).find((f) => f.name.toLowerCase().endsWith(".png"));
+    if (!file) { toast("PNG 파일만 열 수 있습니다.", true); return; }
+    const reader = new FileReader();
+    reader.onload = async () => opened(await API.open_bytes(file.name, reader.result));
+    reader.readAsDataURL(file);
+  });
+  // 그 밖의 곳(결과 칸 포함): 브라우저가 파일을 열어 버리지 않게 막고, 놓을 수 없음을 표시
+  document.addEventListener("dragover", (e) => {
+    if (vp.contains(e.target)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "none";
+  });
+  document.addEventListener("drop", (e) => { if (!vp.contains(e.target)) e.preventDefault(); });
 }
 
 // ======================================================== 시작

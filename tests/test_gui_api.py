@@ -234,3 +234,49 @@ def test_open_bytes_for_browser_drop(cases, tmp_path):
     r = api.open_bytes("line.png", "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode())
     assert r["ok"] and r["name"] == "line.png"
     assert api.current()["name"] == "line.png"
+
+
+def test_picked_but_refused_candidates_are_reported(tmp_path, cases):
+    # overdraw3_gap1: 후보를 골라도 대표선이 한 줄로 정리되지 않아 병합하지 않는다 (애매하면 합치지 않음)
+    src = tmp_path / "in" / "overdraw3_gap1.png"
+    src.parent.mkdir()
+    save_rgba(cases["overdraw3_gap1"], src)
+    api = GuiApi(Config())
+    api.open_path(src)
+    first = process(api, 1, options={"merge": "pick", "smooth": False, "render": False})
+    number = first["candidates"][0]["n"]
+    assert first["refused"] == [] and not first["candidates"][0]["picked"]
+    picked = api.toggle_candidate(number, selection=[])["selection"]  # 화면처럼 클릭으로 고름
+    res = process(api, 2, options={"merge": "pick", "smooth": False, "render": False}, selection=picked)
+    cand = next(c for c in res["candidates"] if c["n"] == number)
+    assert cand["picked"] and not cand["merged"]
+    assert res["refused"] == [{"n": number, "reason": "대표선이 단일 경로가 아님"}]
+
+
+def test_check_tips_follow_template(image):
+    api = GuiApi(Config())
+    api.open_path(image)
+    process(api, 1)
+    tips = {c["name"]: c["tip"] for c in api.checks(1)["checks"]}
+    assert tips["nongeneration"] == "비생성 검사 (원본 잉크에서 2px 넘게 벗어난 곳에 새 잉크가 생겼는지): 위반 0픽셀"
+    assert tips["connectivity"] == "연결 검사 (다시 그리기로 선이 새로 붙거나, 끊기거나, 사라졌는지): 변화 없음"
+    assert tips["topology"].startswith("위상 검사 (처리한 곳 밖에서 교차(X)·분기(T/Y)·끝점이 바뀌었는지): 변화 없음 (")
+    assert tips["smooth_topology"] == "평활 위상 검사 (떨림 완화 전후로 교차·분기·끝점이 그대로인지): 변화 없음"
+
+
+def test_failed_check_tip_lists_details(image, monkeypatch):
+    real = pipeline.run_stages
+
+    def bad_stages(*a, **k):
+        out = real(*a, **k)
+        out.rgba = out.rgba.copy()
+        out.rgba[0:4, 0:4] = (0, 0, 0, 255)
+        return out
+
+    monkeypatch.setattr("lineclean.gui.api.run_stages", bad_stages)
+    api = GuiApi(Config())
+    api.open_path(image)
+    api.process({"id": 1, "values": values(api), "options": {"merge": "off"}, "selection": []})
+    tips = {c["name"]: c["tip"] for c in api.checks(1)["checks"]}
+    assert tips["nongeneration"].endswith("): 위반 16픽셀")
+    assert tips["topology"].startswith("위상 검사 (처리한 곳 밖에서")

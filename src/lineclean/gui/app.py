@@ -55,8 +55,10 @@ def run_window(config: Config, open_path: Path | None = None, debug: bool = Fals
 
     def on_loaded() -> None:
         # 파일 경로가 필요해서(입력 폴더 보호·해시 확인) 끌어다 놓기는 Python에서 받는다
-        window.dom.document.events.dragover += DOMEventHandler(lambda e: None, True, True)
-        window.dom.document.events.drop += DOMEventHandler(on_drop, True, True)
+        # 원본 칸에 놓은 것만 연다. 다른 곳(결과 칸 등)은 막기만 한다 (브라우저가 파일을 여는 것 방지).
+        window.dom.document.events.dragover += DOMEventHandler(lambda e: None, True)
+        window.dom.document.events.drop += DOMEventHandler(lambda e: None, True)
+        window.dom.get_element("#left-vp").events.drop += DOMEventHandler(on_drop, True, True)
 
     window.events.loaded += on_loaded
     webview.start(debug=debug)

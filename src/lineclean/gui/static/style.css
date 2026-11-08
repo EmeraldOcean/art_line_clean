@@ -15,7 +15,7 @@
   --ok-bg: #e2f0d9; --ok-fg: #2d5b14;
   --bad-bg: #f8dfdd; --bad-fg: #8b231e;
   --warn-bg: #f9ecd2; --warn-fg: #7a4c07;
-  --cand-skip: #d4651c; --cand-merged: #2e7d32;
+  --cand-skip: #d4651c; --cand-merged: #2e7d32; --cand-refused: #b3261e;
   --checker-a: #ffffff; --checker-b: #e7e6e1;
   --drop-hover: #e3e9f7;
   --radius-s: 8px; --radius-m: 12px; --radius-l: 16px;
@@ -145,6 +145,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text-3); ou
   font-variant-numeric: tabular-nums;
 }
 .label.merged { background: var(--cand-merged); }
+.label.refused { background: var(--cand-refused); }
 .label:hover { filter: brightness(1.12); }
 
 .foot { display: flex; align-items: center; gap: 10px; padding: 9px 4px 0; min-height: 34px; }

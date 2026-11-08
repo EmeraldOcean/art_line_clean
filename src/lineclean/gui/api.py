@@ -27,6 +27,24 @@ from lineclean.pipeline import MERGE_MODES, Check, Options, StageCache, StageRes
 
 PICK_RADIUS_PX = 8.0
 CHECK_LABELS = {"nongeneration": "비생성", "connectivity": "연결", "topology": "위상", "smooth_topology": "평활 위상"}
+# 마우스를 올렸을 때: "검사 이름 (짧은 설명): 현재 상태"
+CHECK_TIPS = {
+    "nongeneration": ("비생성 검사", "원본 잉크에서 {d}px 넘게 벗어난 곳에 새 잉크가 생겼는지"),
+    "connectivity": ("연결 검사", "다시 그리기로 선이 새로 붙거나, 끊기거나, 사라졌는지"),
+    "topology": ("위상 검사", "처리한 곳 밖에서 교차(X)·분기(T/Y)·끝점이 바뀌었는지"),
+    "smooth_topology": ("평활 위상 검사", "떨림 완화 전후로 교차·분기·끝점이 그대로인지"),
+}
+
+
+def check_tip(check: Check, cfg: Config) -> str:
+    name, about = CHECK_TIPS.get(check.name, (check.name, ""))
+    status = check.message.split(": ", 1)[-1]
+    # 설명과 겹치는 부분은 뺀다
+    status = status.replace(" (선이 새로 붙거나 끊기지 않음)", "")
+    status = status.removeprefix("처리 영역 밖에서 ").removeprefix("처리 영역 밖 ")
+    lines = [f"{name} ({about.format(d=cfg.checks.nongeneration_d)}): {status}"]
+    lines += [line.strip() for line in check.details]
+    return "\n".join(lines)
 STAGE_LABELS = {"merge": "병합", "smooth": "평활", "render": "다시 그리기"}
 
 
@@ -187,10 +205,14 @@ class GuiApi:
                     for d, (y, x) in candidate_label_points(stages.merge):
                         pts = np.concatenate([edges[i].path for i in d.edge_ids]).astype(float)
                         self._cand_points.append((d.candidate, pts))
-                        candidates.append({"n": d.candidate, "y": y, "x": x, "merged": bool(d.merged)})
+                        picked = options.merge == "pick" and d.candidate in options.merge_ids
+                        candidates.append({"n": d.candidate, "y": y, "x": x, "merged": bool(d.merged),
+                                           "picked": picked, "reason": d.reason})
         if self._stale(request_id):
             return {"stale": True}
 
+        # 골랐지만 안전 검사로 병합하지 않은 후보 (CLI의 "고른 후보지만 병합하지 않음"과 같음)
+        refused = [{"n": c["n"], "reason": c["reason"]} for c in candidates if c["picked"] and not c["merged"]]
         notes = []
         if stages.render is not None:
             r = stages.render
@@ -206,6 +228,7 @@ class GuiApi:
             "mode": options.merge,
             "notes": notes,
             "notice": notice,
+            "refused": refused,
         }
 
     def checks(self, request_id: int) -> dict:
@@ -218,7 +241,8 @@ class GuiApi:
                 self._checks_result, self._checks_id = checks, request_id
         return {"id": request_id, "checks": [
             {"name": c.name, "label": CHECK_LABELS.get(c.name, c.name), "ok": c.ok,
-             "message": "\n".join([c.message, *c.details])} for c in checks]}
+             "message": "\n".join([c.message, *c.details]), "tip": check_tip(c, self._result_cfg)}
+            for c in checks]}
 
     def view(self, request_id: int, mode: str) -> dict:
         """결과 칸 보기: result / diff / topology / candidates 이미지."""
